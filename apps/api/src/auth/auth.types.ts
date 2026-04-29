@@ -10,6 +10,18 @@ export class CurrentUser {
 }
 
 @ObjectType()
+export class LoginResult {
+  @Field()
+  userId: string;
+
+  @Field()
+  displayName: string;
+
+  @Field()
+  email: string;
+}
+
+@ObjectType()
 export class PasskeyChallenge {
   @Field()
   challengeId: string;
@@ -26,4 +38,3 @@ export class PasskeyChallenge {
   @Field()
   expiresAt: string;
 }
-

@@ -1,6 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { isoNow } from "../common/date";
+import { WorkspacesService } from "../workspaces/workspaces.service";
 import { parseSkillMd } from "./skill-md.parser";
 import { Skill, SkillUploadInput, SkillUploadResult, SkillVersion } from "./skill.types";
 
@@ -9,11 +10,15 @@ export class SkillsService {
   private readonly skills = new Map<string, Skill>();
   private readonly versions = new Map<string, SkillVersion[]>();
 
-  list(workspaceId: string): Skill[] {
+  constructor(private readonly workspaces: WorkspacesService) {}
+
+  list(workspaceId: string, userId: string): Skill[] {
+    this.assertWorkspaceMember(workspaceId, userId);
     return [...this.skills.values()].filter((skill) => skill.workspaceId === workspaceId);
   }
 
-  upload(input: SkillUploadInput): SkillUploadResult {
+  upload(input: SkillUploadInput, userId: string): SkillUploadResult {
+    this.assertWorkspaceMember(input.workspaceId, userId);
     const parsed = parseSkillMd(input.skillMdContent);
     const now = isoNow();
     const skill: Skill = {
@@ -50,5 +55,10 @@ export class SkillsService {
       .replace(/^-|-$/g, "")
       .slice(0, 80);
   }
-}
 
+  private assertWorkspaceMember(workspaceId: string, userId: string): void {
+    if (!this.workspaces.isMember(workspaceId, userId)) {
+      throw new ForbiddenException("User is not a member of this workspace");
+    }
+  }
+}

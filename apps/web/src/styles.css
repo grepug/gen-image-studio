@@ -14,6 +14,20 @@ body {
   min-width: 320px;
 }
 
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #ccd8d2;
+  border-radius: 8px;
+  color: #1d2529;
+  font: inherit;
+  padding: 10px 11px;
+}
+
+textarea {
+  resize: vertical;
+}
+
 button {
   font: inherit;
 }
@@ -22,6 +36,33 @@ button {
   display: grid;
   grid-template-columns: 268px 1fr;
   min-height: 100vh;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-panel {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 14px;
+  border: 1px solid #dfe6e1;
+  border-radius: 8px;
+  background: white;
+  padding: 24px;
+}
+
+.login-brand {
+  margin-bottom: 10px;
+}
+
+.login-title {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: 0;
 }
 
 .sidebar {
@@ -219,6 +260,34 @@ button {
   gap: 10px;
 }
 
+.stacked-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.stacked-form label,
+.login-panel label {
+  display: grid;
+  gap: 6px;
+  color: #53635d;
+  font-size: 0.86rem;
+}
+
+.error-text,
+.success-text {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.error-text {
+  color: #a33427;
+}
+
+.success-text {
+  color: #245c4f;
+}
+
 .skill-item,
 .metric-list > div {
   border: 1px solid #e2e9e5;
@@ -275,4 +344,3 @@ button {
     padding: 12px;
   }
 }
-

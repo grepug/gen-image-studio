@@ -15,6 +15,16 @@ export const DASHBOARD_QUERY = gql`
   }
 `;
 
+export const LOGIN_WITH_PASSWORD = gql`
+  mutation LoginWithPassword($email: String!, $password: String!) {
+    loginWithPassword(email: $email, password: $password) {
+      userId
+      displayName
+      email
+    }
+  }
+`;
+
 export const PROVIDER_PROFILES_QUERY = gql`
   query ProviderProfiles($workspaceId: String!) {
     providerProfiles(workspaceId: $workspaceId) {
@@ -47,3 +57,37 @@ export const SKILLS_QUERY = gql`
   }
 `;
 
+export const CREATE_PROVIDER_PROFILE = gql`
+  mutation CreateProviderProfile($input: ProviderProfileInput!) {
+    createProviderProfile(input: $input) {
+      id
+      displayName
+      providerType
+      baseUrl
+      defaultModel
+      defaultImageModel
+      capabilities
+      hasApiKey
+    }
+  }
+`;
+
+export const UPLOAD_SKILL = gql`
+  mutation UploadSkill($input: SkillUploadInput!) {
+    uploadSkill(input: $input) {
+      skill {
+        id
+        name
+        slug
+        status
+      }
+      version {
+        id
+        name
+        description
+        validationStatus
+        validationErrors
+      }
+    }
+  }
+`;

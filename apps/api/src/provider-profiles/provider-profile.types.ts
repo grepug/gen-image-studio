@@ -1,7 +1,7 @@
 import { Field, InputType, ObjectType, registerEnumType } from "@nestjs/graphql";
 
 export enum ProviderTypeGql {
-  openaiCompatible = "openai-compatible"
+  OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE"
 }
 
 registerEnumType(ProviderTypeGql, { name: "ProviderType" });
@@ -71,4 +71,3 @@ export class ProviderProfile {
   @Field()
   updatedAt: string;
 }
-

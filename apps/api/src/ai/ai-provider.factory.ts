@@ -14,7 +14,7 @@ export class AiProviderFactory {
     }
     const provider = createOpenAI({
       baseURL: profile.baseUrl,
-      apiKey: "__server_secret__"
+      apiKey: this.providerProfiles.getApiKey(profileId)
     });
     return provider(profile.defaultModel);
   }

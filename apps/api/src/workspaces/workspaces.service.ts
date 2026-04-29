@@ -42,6 +42,10 @@ export class WorkspacesService {
     return this.memberships.get(workspaceId) ?? [];
   }
 
+  isMember(workspaceId: string, userId: string): boolean {
+    return this.listMemberships(workspaceId).some((membership) => membership.userId === userId);
+  }
+
   ensureWorkspaceForUser(userId: string): Workspace {
     const existing = this.listForUser(userId)[0];
     if (existing) {
@@ -58,4 +62,3 @@ export class WorkspacesService {
       .slice(0, 80);
   }
 }
-
