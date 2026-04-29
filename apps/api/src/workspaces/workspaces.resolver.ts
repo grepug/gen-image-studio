@@ -14,7 +14,11 @@ export class WorkspacesResolver {
   }
 
   @Query(() => [WorkspaceMembership])
-  workspaceMembers(@Args("workspaceId", { type: () => String }) workspaceId: string): WorkspaceMembership[] {
+  workspaceMembers(
+    @Args("workspaceId", { type: () => String }) workspaceId: string,
+    @Context("req") req: { headers: Record<string, string | undefined> }
+  ): WorkspaceMembership[] {
+    this.workspaces.assertMember(workspaceId, currentUserId(req));
     return this.workspaces.listMemberships(workspaceId);
   }
 

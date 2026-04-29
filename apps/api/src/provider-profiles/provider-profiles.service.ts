@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { isoNow } from "../common/date";
@@ -76,9 +76,7 @@ export class ProviderProfilesService {
   }
 
   private assertWorkspaceMember(workspaceId: string, userId: string): void {
-    if (!this.workspaces.isMember(workspaceId, userId)) {
-      throw new ForbiddenException("User is not a member of this workspace");
-    }
+    this.workspaces.assertMember(workspaceId, userId);
   }
 
   private encryptForStorage(value: string): string {

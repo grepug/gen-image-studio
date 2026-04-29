@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { isoNow } from "../common/date";
 import { WorkspacesService } from "../workspaces/workspaces.service";
@@ -57,8 +57,6 @@ export class SkillsService {
   }
 
   private assertWorkspaceMember(workspaceId: string, userId: string): void {
-    if (!this.workspaces.isMember(workspaceId, userId)) {
-      throw new ForbiddenException("User is not a member of this workspace");
-    }
+    this.workspaces.assertMember(workspaceId, userId);
   }
 }
