@@ -1,4 +1,5 @@
-import { Args, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { currentUserId } from "../workspaces/workspaces.resolver";
 import { AuthService } from "./auth.service";
 import { CurrentUser, LoginResult, PasskeyChallenge } from "./auth.types";
 
@@ -7,8 +8,8 @@ export class AuthResolver {
   constructor(private readonly auth: AuthService) {}
 
   @Query(() => CurrentUser)
-  currentUser(): CurrentUser {
-    return this.auth.currentUser();
+  currentUser(@Context("req") req: { headers: Record<string, string | undefined> }): CurrentUser {
+    return this.auth.currentUser(currentUserId(req));
   }
 
   @Mutation(() => PasskeyChallenge)

@@ -36,6 +36,7 @@ export default defineConfig({
         WEB_ORIGIN: "http://127.0.0.1:5173",
         PASSKEY_RP_ID: "localhost",
         PASSKEY_ORIGIN: "http://127.0.0.1:5173",
+        ENABLE_E2E_PASSWORD_LOGIN: "true",
         E2E_TEST_ACCOUNTS_JSON: process.env.E2E_TEST_ACCOUNTS_JSON ?? JSON.stringify(testAccounts)
       }
     },

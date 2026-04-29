@@ -79,7 +79,9 @@ version: 0.1.0
   const [loginWithPassword, loginState] = useMutation(LOGIN_WITH_PASSWORD);
   const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
   const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
-  const dashboard = useQuery<DashboardData>(DASHBOARD_QUERY);
+  const dashboard = useQuery<DashboardData>(DASHBOARD_QUERY, {
+    skip: !loggedInUser
+  });
   const activeWorkspace = dashboard.data?.workspacesForCurrentUser[0];
   const providers = useQuery<ProviderProfilesData>(PROVIDER_PROFILES_QUERY, {
     variables: { workspaceId: activeWorkspace?.id ?? "" },

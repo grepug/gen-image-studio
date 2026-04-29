@@ -7,7 +7,8 @@ export interface ParsedSkillMd {
 
 export function parseSkillMd(content: string): ParsedSkillMd {
   const errors: string[] = [];
-  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
+  const normalized = content.replace(/\r\n/g, "\n");
+  const frontmatter = normalized.match(/^---\n([\s\S]*?)\n---/);
   const fields = new Map<string, string>();
 
   if (!frontmatter) {
@@ -34,4 +35,3 @@ export function parseSkillMd(content: string): ParsedSkillMd {
 
   return { name, description, version, errors };
 }
-

@@ -1,20 +1,25 @@
-import { Args, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { currentUserId } from "../workspaces/workspaces.resolver";
 import { Skill, SkillUploadInput, SkillUploadResult } from "./skill.types";
 import { SkillsService } from "./skills.service";
-
-const demoUserId = "00000000-0000-4000-8000-000000000001";
 
 @Resolver(() => Skill)
 export class SkillsResolver {
   constructor(private readonly skillService: SkillsService) {}
 
   @Query(() => [Skill])
-  skills(@Args("workspaceId", { type: () => String }) workspaceId: string): Skill[] {
-    return this.skillService.list(workspaceId, demoUserId);
+  skills(
+    @Args("workspaceId", { type: () => String }) workspaceId: string,
+    @Context("req") req: { headers: Record<string, string | undefined> }
+  ): Skill[] {
+    return this.skillService.list(workspaceId, currentUserId(req));
   }
 
   @Mutation(() => SkillUploadResult)
-  uploadSkill(@Args("input", { type: () => SkillUploadInput }) input: SkillUploadInput): SkillUploadResult {
-    return this.skillService.upload(input, demoUserId);
+  uploadSkill(
+    @Args("input", { type: () => SkillUploadInput }) input: SkillUploadInput,
+    @Context("req") req: { headers: Record<string, string | undefined> }
+  ): SkillUploadResult {
+    return this.skillService.upload(input, currentUserId(req));
   }
 }

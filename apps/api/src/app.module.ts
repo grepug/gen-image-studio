@@ -16,7 +16,8 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
       driver: ApolloDriver,
       autoSchemaFile: true,
       sortSchema: true,
-      playground: true
+      playground: true,
+      context: ({ req }: { req: unknown }) => ({ req })
     }),
     DbModule,
     WorkspacesModule,
@@ -27,4 +28,3 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
   ]
 })
 export class AppModule {}
-

@@ -19,10 +19,11 @@ export class AuthService {
     this.testAccounts = this.loadTestAccounts();
   }
 
-  currentUser(): CurrentUser {
+  currentUser(userId?: string): CurrentUser {
+    const account = this.testAccounts.find((candidate) => candidate.id === userId) ?? this.testAccounts[0];
     return {
-      id: "00000000-0000-4000-8000-000000000001",
-      displayName: "Local Developer"
+      id: account?.id ?? "00000000-0000-4000-8000-000000000001",
+      displayName: account?.displayName ?? "Local Developer"
     };
   }
 
@@ -44,6 +45,9 @@ export class AuthService {
   }
 
   loginWithPassword(email: string, password: string): LoginResult | null {
+    if (process.env.ENABLE_E2E_PASSWORD_LOGIN !== "true") {
+      return null;
+    }
     const account = this.testAccounts.find((candidate) => candidate.email === email && candidate.password === password);
     if (!account) {
       return null;
@@ -68,6 +72,16 @@ export class AuthService {
   }
 
   private loadTestAccounts(): TestAccount[] {
+    if (process.env.ENABLE_E2E_PASSWORD_LOGIN !== "true") {
+      return [
+        {
+          id: "00000000-0000-4000-8000-000000000001",
+          email: "local@example.test",
+          password: "",
+          displayName: "Local Developer"
+        }
+      ];
+    }
     const raw = process.env.E2E_TEST_ACCOUNTS_JSON;
     if (raw) {
       return JSON.parse(raw) as TestAccount[];
