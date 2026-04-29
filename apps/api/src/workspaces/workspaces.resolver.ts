@@ -1,4 +1,5 @@
 import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { UnauthorizedException } from "@nestjs/common";
 import { WorkspacesService } from "./workspaces.service";
 import { Workspace, WorkspaceMembership } from "./workspace.types";
 
@@ -32,5 +33,9 @@ export class WorkspacesResolver {
 }
 
 export function currentUserId(req: { headers: Record<string, string | undefined> }): string {
-  return req.headers["x-user-id"] ?? "00000000-0000-4000-8000-000000000001";
+  const userId = req.headers["x-user-id"];
+  if (!userId) {
+    throw new UnauthorizedException("Missing authenticated user");
+  }
+  return userId;
 }

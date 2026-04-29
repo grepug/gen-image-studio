@@ -9,7 +9,8 @@ export class AuthResolver {
 
   @Query(() => CurrentUser)
   currentUser(@Context("req") req: { headers: Record<string, string | undefined> }): CurrentUser {
-    return this.auth.currentUser(currentUserId(req));
+    const headerUserId = req.headers["x-user-id"];
+    return this.auth.currentUser(headerUserId);
   }
 
   @Mutation(() => PasskeyChallenge)
