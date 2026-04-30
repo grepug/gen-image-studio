@@ -228,6 +228,17 @@ description: Hash mismatch check.
       contentBase64: oversizedBytes.toString("base64")
     });
     expect(oversized.errors?.[0]?.message).toContain("256KB");
+
+    const base64Bytes = Buffer.from("valid bytes with invalid base64 wrapper");
+    const invalidBase64 = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(base64Bytes).digest("hex"),
+      fileName: "invalid-base64-skill.md",
+      mimeType: "text/markdown",
+      byteSize: base64Bytes.length,
+      contentBase64: `${base64Bytes.toString("base64")}!!!!`
+    });
+    expect(invalidBase64.errors?.[0]?.message).toContain("canonical base64");
   });
 });
 

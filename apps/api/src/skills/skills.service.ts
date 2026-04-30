@@ -125,6 +125,9 @@ export class SkillsService {
     if (input.contentBase64.length > Math.ceil(maxSkillUploadBytes / 3) * 4 + 4) {
       throw new BadRequestException("Skill upload exceeds the 256KB limit");
     }
+    if (!this.isCanonicalBase64(input.contentBase64)) {
+      throw new BadRequestException("Skill upload content must be canonical base64");
+    }
     const bytes = Buffer.from(input.contentBase64, "base64");
     if (bytes.length > maxSkillUploadBytes) {
       throw new BadRequestException("Skill upload exceeds the 256KB limit");
@@ -147,6 +150,13 @@ export class SkillsService {
       mimeType: "text/markdown",
       sha256
     };
+  }
+
+  private isCanonicalBase64(value: string): boolean {
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+      return false;
+    }
+    return Buffer.from(value, "base64").toString("base64") === value;
   }
 
   private async writeSkillArchive(storagePath: string, bytes: Buffer): Promise<void> {
