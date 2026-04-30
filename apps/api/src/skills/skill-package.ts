@@ -220,10 +220,11 @@ function relativeSupportPath(path: string, root: string): string | undefined {
 
 function isAllowedSupportPath(path: string): boolean {
   const parts = path.split("/");
-  if (parts.length < 2 || parts.some((part) => part === "scripts")) {
+  const normalizedParts = parts.map((part) => part.toLowerCase());
+  if (normalizedParts.length < 2 || normalizedParts.some((part) => part === "scripts")) {
     return false;
   }
-  return parts[0] === "references" || parts[0] === "assets";
+  return normalizedParts[0] === "references" || normalizedParts[0] === "assets";
 }
 
 function isTextLikeSupportFile(path: string): boolean {
