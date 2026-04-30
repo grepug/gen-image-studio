@@ -8,6 +8,7 @@ import { AppDb } from "../db/types";
 import { Workspace, WorkspaceMember, WorkspaceMembership } from "./workspace.types";
 
 const membershipManagerRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin"]);
+const jobWriterRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin", "member"]);
 
 @Injectable()
 export class WorkspacesService {
@@ -57,6 +58,13 @@ export class WorkspacesService {
   async assertMember(workspaceId: string, userId: string): Promise<void> {
     if (!(await this.isMember(workspaceId, userId))) {
       throw new ForbiddenException("User is not a member of this workspace");
+    }
+  }
+
+  async assertCanWriteJobs(workspaceId: string, userId: string): Promise<void> {
+    const membership = await this.findMembership(workspaceId, userId);
+    if (!membership || !jobWriterRoles.has(membership.role)) {
+      throw new ForbiddenException("User cannot run workspace jobs");
     }
   }
 

@@ -266,7 +266,8 @@ button {
 
 .skill-list,
 .member-list,
-.metric-list {
+.metric-list,
+.job-result {
   display: grid;
   gap: 10px;
 }
@@ -301,10 +302,21 @@ button {
 
 .skill-item,
 .member-item,
-.metric-list > div {
+.metric-list > div,
+.job-result {
   border: 1px solid #e2e9e5;
   border-radius: 8px;
   padding: 12px;
+}
+
+.job-result {
+  margin-top: 14px;
+  font-size: 0.9rem;
+}
+
+.job-result span {
+  color: #5c6a64;
+  overflow-wrap: anywhere;
 }
 
 .member-item {
