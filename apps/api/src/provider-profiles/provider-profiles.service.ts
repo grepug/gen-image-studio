@@ -25,8 +25,6 @@ type StoredProviderProfile = ProviderProfile & {
   encryptedApiKey: string;
 };
 
-const E2E_PROVIDER_SECRET_KEY = "local-e2e-provider-secret";
-
 @Injectable()
 export class ProviderProfilesService {
   constructor(
@@ -114,9 +112,6 @@ export class ProviderProfilesService {
     const secret = process.env.PROVIDER_SECRET_KEY?.trim();
     if (secret) {
       return secret;
-    }
-    if (process.env.ENABLE_E2E_PASSWORD_LOGIN === "true" && process.env.NODE_ENV !== "production") {
-      return E2E_PROVIDER_SECRET_KEY;
     }
     throw new InternalServerErrorException("PROVIDER_SECRET_KEY is required for persisted provider API keys");
   }

@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Inject } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { DB } from "../db/db.module";
 import { workspaceMemberships, workspaces, users } from "../db/schema";
@@ -12,7 +13,7 @@ export class WorkspacesService {
 
   async createWorkspace(input: { name: string; ownerId: string }): Promise<Workspace> {
     await this.ensureUser(input.ownerId);
-    const slug = `${this.slugify(input.name)}-${input.ownerId.slice(-6)}`;
+    const slug = `${this.slugify(input.name)}-${input.ownerId.slice(-6)}-${randomUUID().slice(0, 8)}`;
     const [workspace] = await this.db
       .insert(workspaces)
       .values({ name: input.name, slug })
@@ -111,10 +112,11 @@ export class WorkspacesService {
   }
 
   private slugify(value: string): string {
-    return value
+    const slug = value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80);
+    return slug || "workspace";
   }
 }
