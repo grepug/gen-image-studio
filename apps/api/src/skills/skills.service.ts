@@ -9,14 +9,19 @@ import { assets, skills, skillVersions } from "../db/schema";
 import { AppDb } from "../db/types";
 import { WorkspacesService } from "../workspaces/workspaces.service";
 import { parseSkillMd } from "./skill-md.parser";
-import { assertAllowedSkillMdLocation, readZipEntries, readZipEntryBytes } from "./skill-package";
+import {
+  assertAllowedSkillMdLocation,
+  readSkillSupportFiles,
+  readZipEntries,
+  readZipEntryBytes,
+  skillPackageArchiveLimits,
+  skillSupportFileLimits
+} from "./skill-package";
 import { Skill, SkillUploadInput, SkillUploadResult, SkillVersion } from "./skill.types";
 
 const maxSkillUploadBytes = 256 * 1024;
 const maxSkillPackageUploadBytes = 512 * 1024;
 const maxExtractedSkillMdBytes = 256 * 1024;
-const maxSkillPackageEntries = 100;
-const maxSkillPackageUncompressedBytes = 2 * 1024 * 1024;
 
 interface DecodedSkillUpload {
   archiveBytes: Buffer;
@@ -208,10 +213,7 @@ export class SkillsService {
     if (input.mimeType && !["application/zip", "application/x-zip-compressed", "application/octet-stream"].includes(input.mimeType)) {
       throw new BadRequestException("Skill package MIME type must be zip or octet-stream");
     }
-    const entries = readZipEntries(bytes, {
-      maxEntries: maxSkillPackageEntries,
-      maxTotalUncompressedBytes: maxSkillPackageUncompressedBytes
-    });
+    const entries = readZipEntries(bytes, skillPackageArchiveLimits);
     const skillMdEntries = entries.filter((entry) => entry.name.endsWith("/SKILL.md") || entry.name === "SKILL.md");
     if (skillMdEntries.length === 0) {
       throw new BadRequestException("Skill package must contain SKILL.md");
@@ -231,6 +233,7 @@ export class SkillsService {
     if (skillMdBytes.length > maxExtractedSkillMdBytes) {
       throw new BadRequestException("Skill package SKILL.md exceeds the 256KB limit");
     }
+    readSkillSupportFiles(bytes, skillSupportFileLimits);
     const skillMdSha256 = createHash("sha256").update(skillMdBytes).digest("hex");
     return {
       archiveBytes: bytes,

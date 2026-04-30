@@ -15,6 +15,18 @@ export interface SkillSupportFile {
   content: string;
 }
 
+export const skillPackageArchiveLimits = {
+  maxEntries: 100,
+  maxTotalUncompressedBytes: 2 * 1024 * 1024
+};
+
+export const skillSupportFileLimits = {
+  ...skillPackageArchiveLimits,
+  maxFiles: 12,
+  maxFileBytes: 16 * 1024,
+  maxTotalBytes: 64 * 1024
+};
+
 export function readZipEntries(
   bytes: Buffer,
   limits: { maxEntries: number; maxTotalUncompressedBytes: number }

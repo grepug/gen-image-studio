@@ -10,16 +10,11 @@ import { DB } from "../db/db.module";
 import { assets, jobEvents, jobs, outputs, skills, skillVersions } from "../db/schema";
 import { AppDb } from "../db/types";
 import { ProviderProfilesService } from "../provider-profiles/provider-profiles.service";
-import { readSkillSupportFiles, SkillSupportFile } from "../skills/skill-package";
+import { readSkillSupportFiles, SkillSupportFile, skillSupportFileLimits } from "../skills/skill-package";
 import { WorkspacesService } from "../workspaces/workspaces.service";
 import { GenerationJob, JobEvent, JobOutput, RunImageGenerationJobInput } from "./job.types";
 
 const imageGenerationTimeoutMs = 600_000;
-const maxSkillPackageEntries = 100;
-const maxSkillPackageUncompressedBytes = 2 * 1024 * 1024;
-const maxSupportFiles = 12;
-const maxSupportFileBytes = 16 * 1024;
-const maxSupportTotalBytes = 64 * 1024;
 const imageGenerationJobInputSchema = z.object({
   workspaceId: z.string().uuid(),
   providerProfileId: z.string().uuid(),
@@ -173,13 +168,7 @@ export class JobsService {
       return { skillMd, supportFiles: [] };
     }
     const archiveBytes = await readFile(this.assetPath(skill.archiveAsset.storagePath));
-    const supportFiles = readSkillSupportFiles(archiveBytes, {
-      maxEntries: maxSkillPackageEntries,
-      maxTotalUncompressedBytes: maxSkillPackageUncompressedBytes,
-      maxFiles: maxSupportFiles,
-      maxFileBytes: maxSupportFileBytes,
-      maxTotalBytes: maxSupportTotalBytes
-    });
+    const supportFiles = readSkillSupportFiles(archiveBytes, skillSupportFileLimits);
     return { skillMd, supportFiles };
   }
 
@@ -199,7 +188,7 @@ export class JobsService {
         "",
         "<skill_support_files>",
         ...skillContext.supportFiles.flatMap((file) => [
-          `<file path="${file.path}">`,
+          `<file path="${this.escapePromptAttribute(file.path)}">`,
           file.content,
           "</file>",
           ""
@@ -214,6 +203,17 @@ export class JobsService {
       "User image request:",
       userPrompt
     ].join("\n");
+  }
+
+  private escapePromptAttribute(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\r/g, "&#13;")
+      .replace(/\n/g, "&#10;")
+      .replace(/\t/g, "&#9;");
   }
 
   private async writeOutputAsset(workspaceId: string, ownerId: string, bytes: Buffer) {
