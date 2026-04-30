@@ -267,6 +267,7 @@ button {
 .skill-list,
 .member-list,
 .metric-list,
+.job-history,
 .job-result {
   display: grid;
   gap: 10px;
