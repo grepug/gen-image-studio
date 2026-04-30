@@ -6,7 +6,8 @@ Gen Image Studio is a workspace-based image generation app where users bring the
 
 - pnpm monorepo
 - Vite + React + Apollo Client + Base UI in `apps/web`
-- NestJS + GraphQL + Drizzle + PostgreSQL + Vercel AI SDK in `apps/api`
+- NestJS + GraphQL + Drizzle + PostgreSQL in `apps/api`
+- Vercel AI SDK provider wiring for user-configured language models, plus a direct gen-gallery-compatible Responses image transport
 - Shared frontend/backend contracts in `packages/shared`
 
 ## Local Setup
@@ -14,12 +15,30 @@ Gen Image Studio is a workspace-based image generation app where users bring the
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d postgres
-pnpm db:generate
+docker compose up -d --wait postgres
+pnpm db:migrate
 pnpm dev
 ```
 
 The app does not use global model provider environment variables such as `OPENAI_API_KEY`. Users configure provider base URLs, API keys, models, and capabilities in the app. The API stores those secrets server-side and only returns redacted status to the frontend.
+
+## Local Test Login
+
+`.env.example` enables local/e2e password login for repeatable browser validation. It is gated by:
+
+```bash
+ENABLE_E2E_PASSWORD_LOGIN=true
+```
+
+With no `E2E_TEST_ACCOUNTS_JSON` override, the API creates five local accounts on demand:
+
+- `tester1@example.test` / `test-password-1`
+- `tester2@example.test` / `test-password-2`
+- `tester3@example.test` / `test-password-3`
+- `tester4@example.test` / `test-password-4`
+- `tester5@example.test` / `test-password-5`
+
+Set `ENABLE_E2E_PASSWORD_LOGIN=false` outside local development and automated tests.
 
 ## Passkeys
 
@@ -45,8 +64,11 @@ Initial roles:
 
 ## Agent Skills
 
-Uploaded skills follow the AI SDK Agent Skills directory model. Each package must include a `SKILL.md` file with frontmatter metadata. The backend indexes metadata and stores the original package/extracted directory reference, but this foundation slice does not execute uploaded code.
-For zipped packages, generation also includes bounded text files from safe support paths such as `references/` and text-like `assets/`; scripts and binary files are not executed or added to prompts.
+Uploaded skills follow the AI SDK Agent Skills directory model. Each package must include a `SKILL.md` file with frontmatter metadata. The backend indexes metadata, stores the original package and extracted instruction asset, and uses those instructions when running image generation jobs.
+
+Image generation requests use the direct gen-gallery-compatible Responses request shape against each workspace provider profile: the API posts to the user-configured provider base URL with that provider's stored API key, text model, image tool model, and image-generation tool capability. It does not read global provider keys from process environment.
+
+For zipped packages, generation also includes bounded text files from safe support paths such as `references/` and text-like `assets/`. Package scripts and binary files are not executed or added to prompts.
 
 ## Validation
 
@@ -54,6 +76,7 @@ For zipped packages, generation also includes bounded text files from safe suppo
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm test:e2e
 ```
 
 CI is intentionally skipped for now.
