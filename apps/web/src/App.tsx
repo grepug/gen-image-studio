@@ -231,7 +231,6 @@ export function App() {
           mimeType: skillFile.type || "text/markdown",
           byteSize: skillFile.size,
           contentBase64,
-          skillMdContent: "",
           permissions: ["use-provider", "write-workspace-assets"]
         }
       },

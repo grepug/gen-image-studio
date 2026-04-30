@@ -20,9 +20,6 @@ export class SkillUploadInput {
   @Field()
   contentBase64: string;
 
-  @Field()
-  skillMdContent: string;
-
   @Field(() => [String], { defaultValue: [] })
   permissions: string[];
 }

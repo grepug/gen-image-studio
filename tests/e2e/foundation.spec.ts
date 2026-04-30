@@ -194,6 +194,41 @@ version: 2.0.0
     await expect(page.getByText("SKILL.md frontmatter must include name")).toBeVisible();
     await expect(page.getByText("SKILL.md frontmatter must include description")).toBeVisible();
   });
+
+  test("rejects skill uploads with invalid archive metadata", async ({ page }) => {
+    await login(page);
+    const workspaceId = await currentWorkspaceId(page);
+    const filePath = await writeSkillFile("tampered-skill.md", `---
+name: tampered-skill
+description: Hash mismatch check.
+---
+
+# Tampered Skill
+`);
+    const bytes = await readFile(filePath);
+    const contentBase64 = bytes.toString("base64");
+
+    const mismatch = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: "0".repeat(64),
+      fileName: "tampered-skill.md",
+      mimeType: "text/markdown",
+      byteSize: bytes.length,
+      contentBase64
+    });
+    expect(mismatch.errors?.[0]?.message).toContain("sha256");
+
+    const oversizedBytes = Buffer.from("small body with oversized metadata");
+    const oversized = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(oversizedBytes).digest("hex"),
+      fileName: "oversized-skill.md",
+      mimeType: "text/markdown",
+      byteSize: 256 * 1024 + 1,
+      contentBase64: oversizedBytes.toString("base64")
+    });
+    expect(oversized.errors?.[0]?.message).toContain("256KB");
+  });
 });
 
 async function currentWorkspaceId(page: Page): Promise<string> {
@@ -224,4 +259,38 @@ async function expectStoredSkillArchive(filePath: string): Promise<void> {
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-archives", `${sha256}.md`));
   expect(storedBytes.equals(bytes)).toBe(true);
+}
+
+async function uploadSkillViaGraphql(
+  page: Page,
+  input: {
+    workspaceId: string;
+    archiveSha256: string;
+    fileName: string;
+    mimeType: string;
+    byteSize: number;
+    contentBase64: string;
+  }
+): Promise<{ errors?: { message: string }[] }> {
+  return page.evaluate(async (uploadInput) => {
+    const response = await fetch("http://localhost:4000/graphql", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `mutation UploadSkill($input: SkillUploadInput!) {
+          uploadSkill(input: $input) {
+            skill { id }
+          }
+        }`,
+        variables: {
+          input: {
+            ...uploadInput,
+            permissions: []
+          }
+        }
+      })
+    });
+    return response.json();
+  }, input);
 }

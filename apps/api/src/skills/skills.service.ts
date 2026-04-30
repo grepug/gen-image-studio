@@ -41,7 +41,7 @@ export class SkillsService {
           workspaceId: input.workspaceId,
           ownerId: userId,
           kind: "skill-archive",
-          mimeType: file.mimeType,
+          mimeType: "text/markdown",
           byteSize: file.bytes.length,
           sha256: file.sha256,
           storagePath
@@ -116,10 +116,16 @@ export class SkillsService {
   }
 
   private decodeUpload(input: SkillUploadInput): { bytes: Buffer; mimeType: string; sha256: string } {
-    const bytes = Buffer.from(input.contentBase64, "base64");
-    if (bytes.length === 0) {
-      throw new BadRequestException("Skill upload file is empty");
+    if (!Number.isSafeInteger(input.byteSize) || input.byteSize <= 0) {
+      throw new BadRequestException("Skill upload byte size must be a positive integer");
     }
+    if (input.byteSize > maxSkillUploadBytes) {
+      throw new BadRequestException("Skill upload exceeds the 256KB limit");
+    }
+    if (input.contentBase64.length > Math.ceil(maxSkillUploadBytes / 3) * 4 + 4) {
+      throw new BadRequestException("Skill upload exceeds the 256KB limit");
+    }
+    const bytes = Buffer.from(input.contentBase64, "base64");
     if (bytes.length > maxSkillUploadBytes) {
       throw new BadRequestException("Skill upload exceeds the 256KB limit");
     }
@@ -129,13 +135,16 @@ export class SkillsService {
     if (!input.fileName.toLowerCase().endsWith(".md")) {
       throw new BadRequestException("Only .md Agent Skill files are supported");
     }
+    if (input.mimeType && !["text/markdown", "text/plain", "application/octet-stream"].includes(input.mimeType)) {
+      throw new BadRequestException("Skill upload MIME type must be markdown or plain text");
+    }
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (sha256 !== input.archiveSha256) {
       throw new BadRequestException("Skill upload sha256 does not match the file content");
     }
     return {
       bytes,
-      mimeType: input.mimeType || "text/markdown",
+      mimeType: "text/markdown",
       sha256
     };
   }
