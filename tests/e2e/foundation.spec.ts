@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { deflateRawSync } from "node:zlib";
 
 const accounts = [
   { email: "tester1@example.test", password: "test-password-1", displayName: "Tester 1" },
@@ -463,6 +464,17 @@ description: Hash mismatch check.
       contentBase64: compressedBombBytes.toString("base64")
     });
     expect(compressedBomb.errors?.[0]?.message).toContain("2MB");
+
+    const spoofedSkillMdBytes = createSpoofedDeflateZip("SKILL.md", Buffer.alloc(1024 * 1024, "A"), 128);
+    const spoofedSkillMd = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(spoofedSkillMdBytes).digest("hex"),
+      fileName: "spoofed-skill-md.zip",
+      mimeType: "application/zip",
+      byteSize: spoofedSkillMdBytes.length,
+      contentBase64: spoofedSkillMdBytes.toString("base64")
+    });
+    expect(spoofedSkillMd.errors?.[0]?.message).toContain("allowed extracted size");
   });
 
   test("runs an uploaded Agent Skill through a gen-gallery compatible responses stream", async ({ page }) => {
@@ -948,6 +960,43 @@ async function uploadZipSkillViaGraphql(
 function createZipBytes(entries: Record<string, string>): Buffer {
   const encoded = Object.fromEntries(Object.entries(entries).map(([name, content]) => [name, strToU8(content)]));
   return Buffer.from(zipSync(encoded));
+}
+
+function createSpoofedDeflateZip(fileName: string, content: Buffer, reportedUncompressedSize: number): Buffer {
+  const name = Buffer.from(fileName);
+  const compressed = deflateRawSync(content);
+  const crc32 = 0;
+  const localHeader = Buffer.alloc(30);
+  localHeader.writeUInt32LE(0x04034b50, 0);
+  localHeader.writeUInt16LE(20, 4);
+  localHeader.writeUInt16LE(0, 6);
+  localHeader.writeUInt16LE(8, 8);
+  localHeader.writeUInt32LE(crc32, 14);
+  localHeader.writeUInt32LE(compressed.length, 18);
+  localHeader.writeUInt32LE(reportedUncompressedSize, 22);
+  localHeader.writeUInt16LE(name.length, 26);
+
+  const centralDirectory = Buffer.alloc(46);
+  centralDirectory.writeUInt32LE(0x02014b50, 0);
+  centralDirectory.writeUInt16LE(20, 4);
+  centralDirectory.writeUInt16LE(20, 6);
+  centralDirectory.writeUInt16LE(0, 8);
+  centralDirectory.writeUInt16LE(8, 10);
+  centralDirectory.writeUInt32LE(crc32, 16);
+  centralDirectory.writeUInt32LE(compressed.length, 20);
+  centralDirectory.writeUInt32LE(reportedUncompressedSize, 24);
+  centralDirectory.writeUInt16LE(name.length, 28);
+
+  const centralDirectoryOffset = localHeader.length + name.length + compressed.length;
+  const centralDirectorySize = centralDirectory.length + name.length;
+  const endOfCentralDirectory = Buffer.alloc(22);
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
+  endOfCentralDirectory.writeUInt16LE(1, 8);
+  endOfCentralDirectory.writeUInt16LE(1, 10);
+  endOfCentralDirectory.writeUInt32LE(centralDirectorySize, 12);
+  endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
+
+  return Buffer.concat([localHeader, name, compressed, centralDirectory, name, endOfCentralDirectory]);
 }
 
 function validSkillMarkdown(name: string): string {

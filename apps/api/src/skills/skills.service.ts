@@ -338,7 +338,15 @@ export class SkillsService {
       throw new BadRequestException("Skill package local file data is invalid");
     }
     const compressedBytes = bytes.subarray(dataStart, dataEnd);
-    const output = entry.compressionMethod === 0 ? Buffer.from(compressedBytes) : inflateRawSync(compressedBytes);
+    let output: Buffer;
+    try {
+      output =
+        entry.compressionMethod === 0
+          ? Buffer.from(compressedBytes)
+          : inflateRawSync(compressedBytes, { maxOutputLength: maxExtractedSkillMdBytes + 1 });
+    } catch {
+      throw new BadRequestException("Skill package entry exceeds the allowed extracted size");
+    }
     if (output.length !== entry.uncompressedSize) {
       throw new BadRequestException("Skill package entry size metadata does not match content");
     }
