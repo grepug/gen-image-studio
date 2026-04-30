@@ -71,6 +71,35 @@ test.describe("foundation workspace flows", () => {
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   });
 
+  test("navigates workspace panels from sidebar actions", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page);
+
+    const providersNav = page.getByRole("button", { name: "Providers" });
+    await providersNav.click();
+    await expect(providersNav).toHaveAttribute("aria-current", "location");
+    await expect(page.locator("#providers-panel")).toBeFocused();
+
+    await page.getByRole("button", { name: "Add Provider" }).click();
+    await expect(page.getByLabel("Provider name")).toBeFocused();
+    await expect(page.getByLabel("Provider name")).toHaveValue("Local OpenAI Compatible");
+
+    const skillsNav = page.getByRole("button", { name: "Skills" });
+    await skillsNav.click();
+    await expect(skillsNav).toHaveAttribute("aria-current", "location");
+    await expect(page.locator("#skills-panel")).toBeFocused();
+
+    const membersNav = page.getByRole("button", { name: "Members" });
+    await membersNav.click();
+    await expect(membersNav).toHaveAttribute("aria-current", "location");
+    await expect(page.locator("#members-panel")).toBeFocused();
+
+    const settingsNav = page.getByRole("button", { name: "Settings" });
+    await settingsNav.click();
+    await expect(settingsNav).toHaveAttribute("aria-current", "location");
+    await expect(page.locator("#settings-panel")).toBeFocused();
+  });
+
   test("does not leak cached workspace data when switching users", async ({ page }) => {
     await resetBrowserState(page);
     await login(page, accounts[0]);
