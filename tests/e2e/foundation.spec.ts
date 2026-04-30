@@ -1,4 +1,7 @@
 import { expect, Page, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const accounts = [
   { email: "tester1@example.test", password: "test-password-1", displayName: "Tester 1" },
@@ -162,10 +165,9 @@ test.describe("foundation workspace flows", () => {
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
   });
 
-  test("indexes a valid Agent Skill from SKILL.md content", async ({ page }) => {
+  test("indexes a valid Agent Skill from an uploaded SKILL.md file", async ({ page }) => {
     await login(page);
-
-    await page.getByLabel("SKILL.md").fill(`---
+    const filePath = await writeSkillFile("valid-skill.md", `---
 name: e2e-image-skill
 description: Generates images for the Playwright flow.
 version: 2.0.0
@@ -173,21 +175,96 @@ version: 2.0.0
 
 # E2E Image Skill
 `);
-    await page.getByRole("button", { name: "Validate Skill" }).click();
+    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("Indexed e2e-image-skill")).toBeVisible();
     await expect(page.locator(".skill-item").filter({ hasText: "e2e-image-skill" })).toBeVisible();
+    await expectStoredSkillArchive(filePath);
   });
 
-  test("shows validation errors for invalid Agent Skill content", async ({ page }) => {
+  test("shows validation errors for an invalid Agent Skill file", async ({ page }) => {
     await login(page);
+    const filePath = await writeSkillFile("invalid-skill.md", "# No frontmatter here");
 
-    await page.getByLabel("SKILL.md").fill("# No frontmatter here");
-    await page.getByRole("button", { name: "Validate Skill" }).click();
+    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("SKILL.md must start with YAML frontmatter")).toBeVisible();
     await expect(page.getByText("SKILL.md frontmatter must include name")).toBeVisible();
     await expect(page.getByText("SKILL.md frontmatter must include description")).toBeVisible();
+  });
+
+  test("accepts a valid Agent Skill upload above the default JSON body limit", async ({ page }) => {
+    await login(page);
+    const workspaceId = await currentWorkspaceId(page);
+    const filePath = await writeSkillFile("large-valid-skill.md", `---
+name: large-valid-skill
+description: Valid upload that exercises GraphQL body parser limits.
+---
+
+# Large Valid Skill
+
+${"A".repeat(192 * 1024)}
+`);
+    const bytes = await readFile(filePath);
+    const upload = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(bytes).digest("hex"),
+      fileName: "large-valid-skill.md",
+      mimeType: "text/markdown",
+      byteSize: bytes.length,
+      contentBase64: bytes.toString("base64")
+    });
+    expect(upload.errors).toBeUndefined();
+    expect(upload.data?.uploadSkill.skill.id).toBeTruthy();
+    await expectStoredSkillArchive(filePath);
+  });
+
+  test("rejects skill uploads with invalid archive metadata", async ({ page }) => {
+    await login(page);
+    const workspaceId = await currentWorkspaceId(page);
+    const filePath = await writeSkillFile("tampered-skill.md", `---
+name: tampered-skill
+description: Hash mismatch check.
+---
+
+# Tampered Skill
+`);
+    const bytes = await readFile(filePath);
+    const contentBase64 = bytes.toString("base64");
+
+    const mismatch = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: "0".repeat(64),
+      fileName: "tampered-skill.md",
+      mimeType: "text/markdown",
+      byteSize: bytes.length,
+      contentBase64
+    });
+    expect(mismatch.errors?.[0]?.message).toContain("sha256");
+
+    const oversizedBytes = Buffer.from("small body with oversized metadata");
+    const oversized = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(oversizedBytes).digest("hex"),
+      fileName: "oversized-skill.md",
+      mimeType: "text/markdown",
+      byteSize: 256 * 1024 + 1,
+      contentBase64: oversizedBytes.toString("base64")
+    });
+    expect(oversized.errors?.[0]?.message).toContain("256KB");
+
+    const base64Bytes = Buffer.from("valid bytes with invalid base64 wrapper");
+    const invalidBase64 = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(base64Bytes).digest("hex"),
+      fileName: "invalid-base64-skill.md",
+      mimeType: "text/markdown",
+      byteSize: base64Bytes.length,
+      contentBase64: `${base64Bytes.toString("base64")}!!!!`
+    });
+    expect(invalidBase64.errors?.[0]?.message).toContain("canonical base64");
   });
 });
 
@@ -204,4 +281,53 @@ async function currentWorkspaceId(page: Page): Promise<string> {
     const json = await response.json();
     return json.data.workspacesForCurrentUser[0].id as string;
   });
+}
+
+async function writeSkillFile(name: string, content: string): Promise<string> {
+  const dir = join(process.cwd(), "test-results", "skill-fixtures");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, content);
+  return path;
+}
+
+async function expectStoredSkillArchive(filePath: string): Promise<void> {
+  const bytes = await readFile(filePath);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-archives", `${sha256}.md`));
+  expect(storedBytes.equals(bytes)).toBe(true);
+}
+
+async function uploadSkillViaGraphql(
+  page: Page,
+  input: {
+    workspaceId: string;
+    archiveSha256: string;
+    fileName: string;
+    mimeType: string;
+    byteSize: number;
+    contentBase64: string;
+  }
+): Promise<{ data?: { uploadSkill: { skill: { id: string } } }; errors?: { message: string }[] }> {
+  return page.evaluate(async (uploadInput) => {
+    const response = await fetch("http://localhost:4000/graphql", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `mutation UploadSkill($input: SkillUploadInput!) {
+          uploadSkill(input: $input) {
+            skill { id }
+          }
+        }`,
+        variables: {
+          input: {
+            ...uploadInput,
+            permissions: []
+          }
+        }
+      })
+    });
+    return response.json();
+  }, input);
 }

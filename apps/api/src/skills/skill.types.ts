@@ -9,7 +9,16 @@ export class SkillUploadInput {
   archiveSha256: string;
 
   @Field()
-  skillMdContent: string;
+  fileName: string;
+
+  @Field()
+  mimeType: string;
+
+  @Field()
+  byteSize: number;
+
+  @Field()
+  contentBase64: string;
 
   @Field(() => [String], { defaultValue: [] })
   permissions: string[];
@@ -80,4 +89,3 @@ export class SkillUploadResult {
   @Field(() => SkillVersion)
   version: SkillVersion;
 }
-
