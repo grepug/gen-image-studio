@@ -20,11 +20,7 @@ export class WorkspacesService {
     if (!workspace) {
       throw new Error("Workspace creation failed");
     }
-    await this.db.insert(workspaceMemberships).values({
-      workspaceId: workspace.id,
-      userId: input.ownerId,
-      role: "owner"
-    });
+    await this.ensureMembership(workspace.id, input.ownerId, "owner");
     return this.toWorkspace(workspace);
   }
 
@@ -71,7 +67,31 @@ export class WorkspacesService {
     if (existing) {
       return existing;
     }
-    return this.createWorkspace({ name: "Personal Workspace", ownerId: userId });
+
+    const slug = `personal-${userId}`;
+    const [inserted] = await this.db
+      .insert(workspaces)
+      .values({ name: "Personal Workspace", slug })
+      .onConflictDoNothing()
+      .returning();
+    const workspace = inserted ?? (await this.findBySlug(slug));
+    if (!workspace) {
+      throw new Error("Personal workspace creation failed");
+    }
+    await this.ensureMembership(workspace.id, userId, "owner");
+    return this.toWorkspace(workspace);
+  }
+
+  private async findBySlug(slug: string): Promise<typeof workspaces.$inferSelect | undefined> {
+    const [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.slug, slug)).limit(1);
+    return workspace;
+  }
+
+  private async ensureMembership(workspaceId: string, userId: string, role: "owner"): Promise<void> {
+    await this.db
+      .insert(workspaceMemberships)
+      .values({ workspaceId, userId, role })
+      .onConflictDoNothing();
   }
 
   private async ensureUser(userId: string): Promise<void> {

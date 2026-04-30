@@ -25,6 +25,8 @@ type StoredProviderProfile = ProviderProfile & {
   encryptedApiKey: string;
 };
 
+const E2E_PROVIDER_SECRET_KEY = "local-e2e-provider-secret";
+
 @Injectable()
 export class ProviderProfilesService {
   constructor(
@@ -89,11 +91,7 @@ export class ProviderProfilesService {
   }
 
   private encryptForStorage(value: string): string {
-    const secret = process.env.PROVIDER_SECRET_KEY;
-    if (!secret && process.env.NODE_ENV === "production") {
-      throw new InternalServerErrorException("PROVIDER_SECRET_KEY is required in production");
-    }
-    const key = createHash("sha256").update(secret ?? "local-e2e-provider-secret").digest();
+    const key = createHash("sha256").update(this.providerSecretKey()).digest();
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", key, iv);
     const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
@@ -106,14 +104,21 @@ export class ProviderProfilesService {
     if (!ivRaw || !tagRaw || !encryptedRaw) {
       throw new InternalServerErrorException("Invalid encrypted provider key payload");
     }
-    const secret = process.env.PROVIDER_SECRET_KEY;
-    if (!secret && process.env.NODE_ENV === "production") {
-      throw new InternalServerErrorException("PROVIDER_SECRET_KEY is required in production");
-    }
-    const key = createHash("sha256").update(secret ?? "local-e2e-provider-secret").digest();
+    const key = createHash("sha256").update(this.providerSecretKey()).digest();
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivRaw, "base64url"));
     decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
     return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, "base64url")), decipher.final()]).toString("utf8");
+  }
+
+  private providerSecretKey(): string {
+    const secret = process.env.PROVIDER_SECRET_KEY?.trim();
+    if (secret) {
+      return secret;
+    }
+    if (process.env.ENABLE_E2E_PASSWORD_LOGIN === "true" && process.env.NODE_ENV !== "production") {
+      return E2E_PROVIDER_SECRET_KEY;
+    }
+    throw new InternalServerErrorException("PROVIDER_SECRET_KEY is required for persisted provider API keys");
   }
 
   private toProviderProfile(row: typeof providerProfiles.$inferSelect): ProviderProfile {
