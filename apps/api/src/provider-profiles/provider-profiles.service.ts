@@ -30,6 +30,7 @@ const providerProfileUpdateSchema = z.object({
   capabilities: z.array(z.string()),
   apiKey: z.string().min(1).nullish()
 });
+const providerProfileIdSchema = z.string().uuid();
 
 type StoredProviderProfile = ProviderProfile & {
   encryptedApiKey: string;
@@ -43,7 +44,7 @@ export class ProviderProfilesService {
   ) {}
 
   async create(input: ProviderProfileInput, userId: string): Promise<ProviderProfile> {
-    await this.assertWorkspaceMember(input.workspaceId, userId);
+    await this.assertCanWriteProviders(input.workspaceId, userId);
     providerProfileInputSchema.parse({
       ...input,
       providerType: "openai-compatible"
@@ -83,7 +84,7 @@ export class ProviderProfilesService {
     if (!existing) {
       throw new NotFoundException("Provider profile not found");
     }
-    await this.assertWorkspaceMember(existing.workspaceId, userId);
+    await this.assertCanWriteProviders(existing.workspaceId, userId);
     const [profile] = await this.db
       .update(providerProfiles)
       .set({
@@ -104,12 +105,13 @@ export class ProviderProfilesService {
   }
 
   async delete(id: string, userId: string): Promise<boolean> {
-    const [profile] = await this.db.select().from(providerProfiles).where(eq(providerProfiles.id, id)).limit(1);
+    const providerId = providerProfileIdSchema.parse(id);
+    const [profile] = await this.db.select().from(providerProfiles).where(eq(providerProfiles.id, providerId)).limit(1);
     if (!profile) {
       throw new NotFoundException("Provider profile not found");
     }
-    await this.assertWorkspaceMember(profile.workspaceId, userId);
-    await this.db.delete(providerProfiles).where(eq(providerProfiles.id, id));
+    await this.assertCanWriteProviders(profile.workspaceId, userId);
+    await this.db.delete(providerProfiles).where(eq(providerProfiles.id, providerId));
     return true;
   }
 
@@ -132,6 +134,10 @@ export class ProviderProfilesService {
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
     await this.workspaces.assertMember(workspaceId, userId);
+  }
+
+  private async assertCanWriteProviders(workspaceId: string, userId: string): Promise<void> {
+    await this.workspaces.assertCanWriteProviders(workspaceId, userId);
   }
 
   private encryptForStorage(value: string): string {

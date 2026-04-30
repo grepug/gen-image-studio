@@ -337,6 +337,35 @@ description: Skill for updated provider profile.
     }
   });
 
+  test("blocks workspace viewers from editing provider profiles", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[1]);
+    await signOut(page);
+    await login(page, accounts[0]);
+    await createProviderProfile(page, {
+      name: "Viewer Protected Provider",
+      baseUrl: "http://127.0.0.1:1/v1",
+      model: "viewer-protected-model",
+      apiKey: "viewer-protected-key"
+    });
+    await page.getByLabel("Member email").fill(accounts[1].email);
+    await page.getByLabel("New member role").selectOption("viewer");
+    await page.getByRole("button", { name: "Add Member" }).click();
+    const ownerWorkspaceId = await currentWorkspaceId(page);
+
+    await signOut(page);
+    await login(page, accounts[1]);
+    await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+    await expect(page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" })).toBeVisible();
+    await page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" }).getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Provider name").fill("Viewer Mutated Provider");
+    await page.getByRole("button", { name: "Update Provider" }).click();
+    await expect(page.getByText("User cannot manage workspace providers")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete Provider" }).click();
+    await expect(page.getByText("User cannot manage workspace providers")).toBeVisible();
+  });
+
   test("indexes a valid Agent Skill from an uploaded Skill file", async ({ page }) => {
     await login(page);
     const filePath = await writeSkillFile("valid-skill.md", `---
