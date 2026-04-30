@@ -10,6 +10,7 @@ import { Workspace, WorkspaceMember, WorkspaceMembership } from "./workspace.typ
 const membershipManagerRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin"]);
 const jobWriterRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin", "member"]);
 const providerWriterRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin"]);
+const skillWriterRoles = new Set<WorkspaceMembership["role"]>(["owner", "admin", "member"]);
 
 @Injectable()
 export class WorkspacesService {
@@ -73,6 +74,13 @@ export class WorkspacesService {
     const membership = await this.findMembership(workspaceId, userId);
     if (!membership || !providerWriterRoles.has(membership.role)) {
       throw new ForbiddenException("User cannot manage workspace providers");
+    }
+  }
+
+  async assertCanWriteSkills(workspaceId: string, userId: string): Promise<void> {
+    const membership = await this.findMembership(workspaceId, userId);
+    if (!membership || !skillWriterRoles.has(membership.role)) {
+      throw new ForbiddenException("User cannot upload workspace skills");
     }
   }
 
