@@ -525,10 +525,10 @@ export function App() {
             </div>
             <form className="stacked-form" onSubmit={handleSkillSubmit}>
               <label>
-                SKILL.md file
+                Skill file
                 <input
                   type="file"
-                  accept=".md,text/markdown,text/plain"
+                  accept=".md,.zip,text/markdown,text/plain,application/zip,application/octet-stream"
                   onChange={(event) => setSkillFile(event.target.files?.[0] ?? null)}
                 />
               </label>
