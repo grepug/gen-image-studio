@@ -15,6 +15,7 @@ body {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #ccd8d2;
@@ -160,6 +161,11 @@ button {
   font-size: 2rem;
 }
 
+.workspace-select {
+  margin-top: 8px;
+  max-width: 280px;
+}
+
 .eyebrow {
   margin: 0 0 4px;
 }
@@ -259,6 +265,7 @@ button {
 }
 
 .skill-list,
+.member-list,
 .metric-list {
   display: grid;
   gap: 10px;
@@ -293,14 +300,24 @@ button {
 }
 
 .skill-item,
+.member-item,
 .metric-list > div {
   border: 1px solid #e2e9e5;
   border-radius: 8px;
   padding: 12px;
 }
 
+.member-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 106px auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .skill-item strong,
 .skill-item span,
+.member-item strong,
+.member-item span,
 .metric-list span,
 .metric-list strong {
   display: block;
@@ -346,5 +363,9 @@ button {
     grid-template-columns: 1fr;
     gap: 4px;
     padding: 12px;
+  }
+
+  .member-item {
+    grid-template-columns: 1fr;
   }
 }

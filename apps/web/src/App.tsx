@@ -4,6 +4,7 @@ import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import {
+  ADD_WORKSPACE_MEMBER,
   CURRENT_USER_QUERY,
   CREATE_PROVIDER_PROFILE,
   FINISH_PASSKEY_AUTHENTICATION,
@@ -11,10 +12,13 @@ import {
   LOGIN_WITH_PASSWORD,
   LOGOUT,
   PROVIDER_PROFILES_QUERY,
+  REMOVE_WORKSPACE_MEMBER,
   SKILLS_QUERY,
   START_PASSKEY_AUTHENTICATION,
   START_PASSKEY_REGISTRATION,
   UPLOAD_SKILL,
+  UPDATE_WORKSPACE_MEMBER_ROLE,
+  WORKSPACE_MEMBERS_QUERY,
   WORKSPACES_QUERY
 } from "./graphql";
 
@@ -41,6 +45,8 @@ interface Skill {
   status: string;
 }
 
+type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+
 interface DashboardData {
   currentUser: {
     id: string;
@@ -60,6 +66,19 @@ interface SkillsData {
   skills: Skill[];
 }
 
+interface WorkspaceMember {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  displayName: string;
+  email?: string;
+  role: WorkspaceRole;
+}
+
+interface WorkspaceMembersData {
+  workspaceMembers: WorkspaceMember[];
+}
+
 interface LoggedInUser {
   userId: string;
   displayName: string;
@@ -74,6 +93,9 @@ export function App() {
   const [providerBaseUrl, setProviderBaseUrl] = useState("https://api.example.test/v1");
   const [providerModel, setProviderModel] = useState("gpt-image-test");
   const [providerApiKey, setProviderApiKey] = useState("test-key");
+  const [memberEmail, setMemberEmail] = useState("tester2@example.test");
+  const [memberRole, setMemberRole] = useState<WorkspaceRole>("member");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [skillMd, setSkillMd] = useState(`---
 name: studio-image-style
 description: Creates images in the workspace house style.
@@ -95,11 +117,16 @@ version: 0.1.0
   const [finishPasskeyAuthenticationMutation] = useMutation(FINISH_PASSKEY_AUTHENTICATION);
   const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
   const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
+  const [addWorkspaceMember, addMemberMutation] = useMutation(ADD_WORKSPACE_MEMBER);
+  const [updateWorkspaceMemberRole, updateMemberMutation] = useMutation(UPDATE_WORKSPACE_MEMBER_ROLE);
+  const [removeWorkspaceMember, removeMemberMutation] = useMutation(REMOVE_WORKSPACE_MEMBER);
   const currentUser = currentUserQuery.data?.currentUser;
   const workspaces = useQuery<WorkspacesData>(WORKSPACES_QUERY, {
     skip: !currentUser
   });
-  const activeWorkspace = workspaces.data?.workspacesForCurrentUser[0];
+  const workspaceRows = workspaces.data?.workspacesForCurrentUser ?? [];
+  const activeWorkspace =
+    workspaceRows.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaceRows[0];
   const providers = useQuery<ProviderProfilesData>(PROVIDER_PROFILES_QUERY, {
     variables: { workspaceId: activeWorkspace?.id ?? "" },
     skip: !activeWorkspace
@@ -108,12 +135,18 @@ version: 0.1.0
     variables: { workspaceId: activeWorkspace?.id ?? "" },
     skip: !activeWorkspace
   });
+  const members = useQuery<WorkspaceMembersData>(WORKSPACE_MEMBERS_QUERY, {
+    variables: { workspaceId: activeWorkspace?.id ?? "" },
+    skip: !activeWorkspace
+  });
 
   const providerRows = providers.data?.providerProfiles ?? [];
   const skillRows = skills.data?.skills ?? [];
+  const memberRows = members.data?.workspaceMembers ?? [];
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
   const providerError = providerMutation.error?.message;
+  const memberError = addMemberMutation.error?.message ?? updateMemberMutation.error?.message ?? removeMemberMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
   const skillErrors = useMemo(() => skillResult?.version.validationErrors ?? [], [skillResult]);
 
@@ -205,6 +238,37 @@ version: 0.1.0
     });
   }
 
+  async function handleMemberSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeWorkspace) return;
+    await addWorkspaceMember({
+      variables: {
+        input: {
+          workspaceId: activeWorkspace.id,
+          email: memberEmail,
+          role: memberRole
+        }
+      },
+      refetchQueries: [{ query: WORKSPACE_MEMBERS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+  }
+
+  async function handleRoleChange(membershipId: string, role: WorkspaceRole) {
+    if (!activeWorkspace) return;
+    await updateWorkspaceMemberRole({
+      variables: { input: { membershipId, role } },
+      refetchQueries: [{ query: WORKSPACE_MEMBERS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+  }
+
+  async function handleRemoveMember(membershipId: string) {
+    if (!activeWorkspace) return;
+    await removeWorkspaceMember({
+      variables: { membershipId },
+      refetchQueries: [{ query: WORKSPACE_MEMBERS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+  }
+
   if (!currentUser) {
     return (
       <main className="login-page">
@@ -284,6 +348,20 @@ version: 0.1.0
           <div>
             <p className="eyebrow">{currentUserName}</p>
             <h1>{activeWorkspace?.name ?? "Workspace setup"}</h1>
+            {workspaceRows.length > 1 ? (
+              <select
+                aria-label="Active workspace"
+                className="workspace-select"
+                value={activeWorkspace?.id ?? ""}
+                onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+              >
+                {workspaceRows.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
           </div>
           <div className="topbar-actions">
             <Button className="secondary-button" onClick={handleRegisterPasskey}>
@@ -395,20 +473,51 @@ version: 0.1.0
                 <p>Shared resources are scoped by membership.</p>
               </div>
             </div>
-            <div className="metric-list">
-              <div>
-                <span>Members</span>
-                <strong>1</strong>
-              </div>
-              <div>
-                <span>Roles</span>
-                <strong>4</strong>
-              </div>
-              <div>
-                <span>Secret exposure</span>
-                <strong>Redacted</strong>
-              </div>
+            <div className="member-list">
+              {memberRows.map((member) => (
+                <article className="member-item" key={member.id}>
+                  <div>
+                    <strong>{member.displayName}</strong>
+                    <span>{member.email ?? member.userId}</span>
+                  </div>
+                  <select
+                    aria-label={`Role for ${member.displayName}`}
+                    value={member.role}
+                    onChange={(event) => handleRoleChange(member.id, event.target.value as WorkspaceRole)}
+                  >
+                    <option value="owner">owner</option>
+                    <option value="admin">admin</option>
+                    <option value="member">member</option>
+                    <option value="viewer">viewer</option>
+                  </select>
+                  <Button className="secondary-button" onClick={() => handleRemoveMember(member.id)}>
+                    Remove
+                  </Button>
+                </article>
+              ))}
             </div>
+            <form className="stacked-form" onSubmit={handleMemberSubmit}>
+              <label>
+                Member email
+                <input value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} />
+              </label>
+              <label>
+                Role
+                <select
+                  aria-label="New member role"
+                  value={memberRole}
+                  onChange={(event) => setMemberRole(event.target.value as WorkspaceRole)}
+                >
+                  <option value="admin">admin</option>
+                  <option value="member">member</option>
+                  <option value="viewer">viewer</option>
+                </select>
+              </label>
+              {memberError ? <p className="error-text">{memberError}</p> : null}
+              <Button className="primary-button" type="submit">
+                Add Member
+              </Button>
+            </form>
           </section>
         </div>
       </section>

@@ -20,6 +20,19 @@ export const WORKSPACES_QUERY = gql`
   }
 `;
 
+export const WORKSPACE_MEMBERS_QUERY = gql`
+  query WorkspaceMembers($workspaceId: String!) {
+    workspaceMembers(workspaceId: $workspaceId) {
+      id
+      workspaceId
+      userId
+      displayName
+      email
+      role
+    }
+  }
+`;
+
 export const LOGOUT = gql`
   mutation Logout {
     logout
@@ -118,6 +131,32 @@ export const CREATE_PROVIDER_PROFILE = gql`
       capabilities
       hasApiKey
     }
+  }
+`;
+
+export const ADD_WORKSPACE_MEMBER = gql`
+  mutation AddWorkspaceMember($input: AddWorkspaceMemberInput!) {
+    addWorkspaceMember(input: $input) {
+      id
+      displayName
+      email
+      role
+    }
+  }
+`;
+
+export const UPDATE_WORKSPACE_MEMBER_ROLE = gql`
+  mutation UpdateWorkspaceMemberRole($input: UpdateWorkspaceMemberRoleInput!) {
+    updateWorkspaceMemberRole(input: $input) {
+      id
+      role
+    }
+  }
+`;
+
+export const REMOVE_WORKSPACE_MEMBER = gql`
+  mutation RemoveWorkspaceMember($membershipId: String!) {
+    removeWorkspaceMember(membershipId: $membershipId)
   }
 `;
 
