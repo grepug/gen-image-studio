@@ -115,9 +115,11 @@ test.describe("foundation workspace flows", () => {
     await page.getByRole("button", { name: "Add Member" }).click();
     await expect(page.getByText(accounts[1].displayName)).toBeVisible();
     await expect(page.getByLabel(`Role for ${accounts[1].displayName}`)).toHaveValue("member");
+    const ownerWorkspaceId = await currentWorkspaceId(page);
 
     await signOut(page);
     await login(page, accounts[1]);
+    await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
     await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
     await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toBeVisible();
 
@@ -188,3 +190,18 @@ version: 2.0.0
     await expect(page.getByText("SKILL.md frontmatter must include description")).toBeVisible();
   });
 });
+
+async function currentWorkspaceId(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const response = await fetch("http://localhost:4000/graphql", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "{ workspacesForCurrentUser { id } }"
+      })
+    });
+    const json = await response.json();
+    return json.data.workspacesForCurrentUser[0].id as string;
+  });
+}

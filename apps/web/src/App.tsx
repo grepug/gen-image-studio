@@ -95,6 +95,7 @@ export function App() {
   const [providerApiKey, setProviderApiKey] = useState("test-key");
   const [memberEmail, setMemberEmail] = useState("tester2@example.test");
   const [memberRole, setMemberRole] = useState<WorkspaceRole>("member");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [skillMd, setSkillMd] = useState(`---
 name: studio-image-style
 description: Creates images in the workspace house style.
@@ -123,7 +124,9 @@ version: 0.1.0
   const workspaces = useQuery<WorkspacesData>(WORKSPACES_QUERY, {
     skip: !currentUser
   });
-  const activeWorkspace = workspaces.data?.workspacesForCurrentUser[0];
+  const workspaceRows = workspaces.data?.workspacesForCurrentUser ?? [];
+  const activeWorkspace =
+    workspaceRows.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaceRows[0];
   const providers = useQuery<ProviderProfilesData>(PROVIDER_PROFILES_QUERY, {
     variables: { workspaceId: activeWorkspace?.id ?? "" },
     skip: !activeWorkspace
@@ -345,6 +348,20 @@ version: 0.1.0
           <div>
             <p className="eyebrow">{currentUserName}</p>
             <h1>{activeWorkspace?.name ?? "Workspace setup"}</h1>
+            {workspaceRows.length > 1 ? (
+              <select
+                aria-label="Active workspace"
+                className="workspace-select"
+                value={activeWorkspace?.id ?? ""}
+                onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+              >
+                {workspaceRows.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
           </div>
           <div className="topbar-actions">
             <Button className="secondary-button" onClick={handleRegisterPasskey}>

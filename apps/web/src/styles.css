@@ -161,6 +161,11 @@ button {
   font-size: 2rem;
 }
 
+.workspace-select {
+  margin-top: 8px;
+  max-width: 280px;
+}
+
 .eyebrow {
   margin: 0 0 4px;
 }

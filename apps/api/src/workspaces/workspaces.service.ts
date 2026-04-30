@@ -70,13 +70,13 @@ export class WorkspacesService {
     if (!user) {
       throw new NotFoundException("User with that email does not exist");
     }
+    const existing = await this.findMembership(input.workspaceId, user.id);
+    if (existing) {
+      return this.toWorkspaceMember(existing, user);
+    }
     const [membership] = await this.db
       .insert(workspaceMemberships)
       .values({ workspaceId: input.workspaceId, userId: user.id, role: input.role })
-      .onConflictDoUpdate({
-        target: [workspaceMemberships.userId, workspaceMemberships.workspaceId],
-        set: { role: input.role, updatedAt: new Date() }
-      })
       .returning();
     if (!membership) {
       throw new Error("Workspace member add failed");
@@ -176,6 +176,18 @@ export class WorkspacesService {
     if (!membership) {
       throw new NotFoundException("Workspace membership not found");
     }
+    return membership;
+  }
+
+  private async findMembership(
+    workspaceId: string,
+    userId: string
+  ): Promise<typeof workspaceMemberships.$inferSelect | undefined> {
+    const [membership] = await this.db
+      .select()
+      .from(workspaceMemberships)
+      .where(and(eq(workspaceMemberships.workspaceId, workspaceId), eq(workspaceMemberships.userId, userId)))
+      .limit(1);
     return membership;
   }
 
