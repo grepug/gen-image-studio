@@ -448,7 +448,9 @@ Always render a polished packaged skill image.
 `;
       const zipPath = await writeZipSkillFile("zipped-image-skill.zip", {
         "zipped-image-skill/SKILL.md": zippedSkillMd,
-        "zipped-image-skill/references/style.md": "# Style notes"
+        "zipped-image-skill/references/style.md": "# Style notes\n\nUse emerald rim lighting from the package reference.",
+        "zipped-image-skill/scripts/unsafe.md": "This script text must not enter the prompt.",
+        "zipped-image-skill/references/Scripts/unsafe.md": "This nested script text must not enter the prompt."
       });
 
       await page.getByLabel("Skill file").setInputFiles(zipPath);
@@ -467,6 +469,10 @@ Always render a polished packaged skill image.
       await expect.poll(() => mock.requests.length).toBe(1);
       expect(mock.requests[0]?.body.input).toContain("zipped-image-skill");
       expect(mock.requests[0]?.body.input).toContain("Always render a polished packaged skill image.");
+      expect(mock.requests[0]?.body.input).toContain('file path="references/style.md"');
+      expect(mock.requests[0]?.body.input).toContain("Use emerald rim lighting from the package reference.");
+      expect(mock.requests[0]?.body.input).not.toContain("This script text must not enter the prompt.");
+      expect(mock.requests[0]?.body.input).not.toContain("This nested script text must not enter the prompt.");
       expect(mock.requests[0]?.body.input).toContain(prompt);
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
       await expect(page.getByAltText("generated-image generated image").first()).toBeVisible();
@@ -619,6 +625,24 @@ description: Hash mismatch check.
       contentBase64: spoofedSkillMdBytes.toString("base64")
     });
     expect(spoofedSkillMd.errors?.[0]?.message).toContain("allowed extracted size");
+
+    const spoofedSupportBytes = spoofZipEntryUncompressedSize(
+      createZipBytes({
+        "SKILL.md": validSkillMarkdown("spoofed-support"),
+        "references/spoofed.txt": "A".repeat(1024)
+      }),
+      "references/spoofed.txt",
+      128
+    );
+    const spoofedSupport = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(spoofedSupportBytes).digest("hex"),
+      fileName: "spoofed-support.zip",
+      mimeType: "application/zip",
+      byteSize: spoofedSupportBytes.length,
+      contentBase64: spoofedSupportBytes.toString("base64")
+    });
+    expect(spoofedSupport.errors?.[0]?.message).toContain("entry size metadata");
   });
 
   test("runs an uploaded Agent Skill through a gen-gallery compatible responses stream", async ({ page }) => {
@@ -1141,6 +1165,47 @@ function createSpoofedDeflateZip(fileName: string, content: Buffer, reportedUnco
   endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
 
   return Buffer.concat([localHeader, name, compressed, centralDirectory, name, endOfCentralDirectory]);
+}
+
+function spoofZipEntryUncompressedSize(bytes: Buffer, fileName: string, reportedUncompressedSize: number): Buffer {
+  const mutated = Buffer.from(bytes);
+  const target = Buffer.from(fileName);
+  for (let offset = 0; offset + 30 < mutated.length; offset += 1) {
+    if (mutated.readUInt32LE(offset) !== 0x04034b50) {
+      continue;
+    }
+    const fileNameLength = mutated.readUInt16LE(offset + 26);
+    const nameStart = offset + 30;
+    if (mutated.subarray(nameStart, nameStart + fileNameLength).equals(target)) {
+      mutated.writeUInt32LE(reportedUncompressedSize, offset + 22);
+      break;
+    }
+  }
+
+  const eocdOffset = findEndOfCentralDirectory(mutated);
+  let centralDirectoryOffset = mutated.readUInt32LE(eocdOffset + 16);
+  const entryCount = mutated.readUInt16LE(eocdOffset + 10);
+  for (let index = 0; index < entryCount; index += 1) {
+    const fileNameLength = mutated.readUInt16LE(centralDirectoryOffset + 28);
+    const extraLength = mutated.readUInt16LE(centralDirectoryOffset + 30);
+    const commentLength = mutated.readUInt16LE(centralDirectoryOffset + 32);
+    const nameStart = centralDirectoryOffset + 46;
+    if (mutated.subarray(nameStart, nameStart + fileNameLength).equals(target)) {
+      mutated.writeUInt32LE(reportedUncompressedSize, centralDirectoryOffset + 24);
+      break;
+    }
+    centralDirectoryOffset = nameStart + fileNameLength + extraLength + commentLength;
+  }
+  return mutated;
+}
+
+function findEndOfCentralDirectory(bytes: Buffer): number {
+  for (let offset = bytes.length - 22; offset >= 0; offset -= 1) {
+    if (bytes.readUInt32LE(offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  throw new Error("Zip end of central directory not found");
 }
 
 function validSkillMarkdown(name: string): string {

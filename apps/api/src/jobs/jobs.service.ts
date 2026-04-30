@@ -10,6 +10,7 @@ import { DB } from "../db/db.module";
 import { assets, jobEvents, jobs, outputs, skills, skillVersions } from "../db/schema";
 import { AppDb } from "../db/types";
 import { ProviderProfilesService } from "../provider-profiles/provider-profiles.service";
+import { readSkillSupportFiles, SkillSupportFile, skillSupportFileLimits } from "../skills/skill-package";
 import { WorkspacesService } from "../workspaces/workspaces.service";
 import { GenerationJob, JobEvent, JobOutput, RunImageGenerationJobInput } from "./job.types";
 
@@ -58,8 +59,8 @@ export class JobsService {
     this.assertProviderCanGenerateImages(provider.capabilities);
     const skill = await this.getLatestValidSkillArchive(parsed.workspaceId, parsed.skillId);
     this.assertSkillCanGenerateImages(skill.version.permissions);
-    const skillMd = await readFile(this.assetPath(skill.asset.storagePath), "utf8");
-    const fullPrompt = this.buildGenerationPrompt(skillMd, parsed.prompt);
+    const skillContext = await this.loadSkillContext(skill);
+    const fullPrompt = this.buildGenerationPrompt(skillContext, parsed.prompt);
 
     const [job] = await this.db
       .insert(jobs)
@@ -117,7 +118,7 @@ export class JobsService {
 
   private async getLatestValidSkillArchive(workspaceId: string, skillId: string) {
     const [row] = await this.db
-      .select({ skill: skills, version: skillVersions, asset: assets })
+      .select({ skill: skills, version: skillVersions, archiveAsset: assets })
       .from(skills)
       .innerJoin(skillVersions, eq(skillVersions.id, skills.latestVersionId))
       .innerJoin(assets, eq(assets.id, skillVersions.archiveAssetId))
@@ -130,7 +131,10 @@ export class JobsService {
       throw new BadRequestException("Skill must have a valid latest version before generation");
     }
     if (!row.version.directoryAssetId) {
-      return row;
+      return {
+        ...row,
+        skillMdAsset: row.archiveAsset
+      };
     }
     const [directoryAsset] = await this.db
       .select()
@@ -142,7 +146,7 @@ export class JobsService {
     }
     return {
       ...row,
-      asset: directoryAsset
+      skillMdAsset: directoryAsset
     };
   }
 
@@ -158,17 +162,58 @@ export class JobsService {
     }
   }
 
-  private buildGenerationPrompt(skillMd: string, userPrompt: string): string {
-    return [
+  private async loadSkillContext(skill: Awaited<ReturnType<JobsService["getLatestValidSkillArchive"]>>) {
+    const skillMd = await readFile(this.assetPath(skill.skillMdAsset.storagePath), "utf8");
+    if (!skill.version.directoryAssetId) {
+      return { skillMd, supportFiles: [] };
+    }
+    const archiveBytes = await readFile(this.assetPath(skill.archiveAsset.storagePath));
+    const supportFiles = readSkillSupportFiles(archiveBytes, skillSupportFileLimits);
+    return { skillMd, supportFiles };
+  }
+
+  private buildGenerationPrompt(skillContext: { skillMd: string; supportFiles: SkillSupportFile[] }, userPrompt: string): string {
+    const sections = [
       "Use the following Agent Skill instructions for this image generation request.",
       "",
       "<skill_md>",
-      skillMd,
+      skillContext.skillMd,
       "</skill_md>",
-      "",
+      ""
+    ];
+
+    if (skillContext.supportFiles.length > 0) {
+      sections.push(
+        "Additional safe text files from the Agent Skill package:",
+        "",
+        "<skill_support_files>",
+        ...skillContext.supportFiles.flatMap((file) => [
+          `<file path="${this.escapePromptAttribute(file.path)}">`,
+          file.content,
+          "</file>",
+          ""
+        ]),
+        "</skill_support_files>",
+        ""
+      );
+    }
+
+    return [
+      ...sections,
       "User image request:",
       userPrompt
     ].join("\n");
+  }
+
+  private escapePromptAttribute(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\r/g, "&#13;")
+      .replace(/\n/g, "&#10;")
+      .replace(/\t/g, "&#9;");
   }
 
   private async writeOutputAsset(workspaceId: string, ownerId: string, bytes: Buffer) {
