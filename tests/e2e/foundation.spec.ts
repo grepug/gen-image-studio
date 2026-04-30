@@ -353,6 +353,120 @@ description: Drives the mock failed generation request.
       await mock.close();
     }
   });
+
+  test("rejects generation when skill permissions do not allow provider and asset writes", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Permission Mock Provider",
+        baseUrl: mock.baseUrl,
+        model: "gpt-mock-permission",
+        apiKey: "mock-secret-key"
+      });
+      const workspaceId = await currentWorkspaceId(page);
+      const skillPath = await writeSkillFile("no-permissions-skill.md", `---
+name: no-permissions-skill
+description: Valid skill without provider permissions.
+---
+
+# No Permissions Skill
+`);
+      const bytes = await readFile(skillPath);
+      const upload = await uploadSkillViaGraphql(page, {
+        workspaceId,
+        archiveSha256: createHash("sha256").update(bytes).digest("hex"),
+        fileName: "no-permissions-skill.md",
+        mimeType: "text/markdown",
+        byteSize: bytes.length,
+        contentBase64: bytes.toString("base64")
+      });
+      expect(upload.data?.uploadSkill.skill.id).toBeTruthy();
+      await page.reload();
+      await expect(page.getByLabel("Generation skill").locator("option", { hasText: "no-permissions-skill" })).toHaveCount(1);
+
+      await page.getByLabel("Generation provider").selectOption({ label: "Permission Mock Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "no-permissions-skill" });
+      await page.getByLabel("Image prompt").fill("This request should be blocked before upstream.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("Skill must request use-provider and write-workspace-assets permissions")).toBeVisible();
+      expect(mock.requests).toHaveLength(0);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("rejects generation before upstream when provider lacks image tool capabilities", async ({ page }) => {
+    const mock = await startResponsesMock({ outputBytes: Buffer.from("not reached") });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "No Capability Provider",
+        baseUrl: mock.baseUrl,
+        model: "gpt-mock-no-capability",
+        apiKey: "mock-secret-key",
+        capabilities: []
+      });
+      const skillPath = await writeSkillFile("capability-skill.md", `---
+name: capability-skill
+description: Valid skill for capability rejection.
+---
+
+# Capability Skill
+`);
+      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByRole("button", { name: "Upload Skill" }).click();
+      await expect(page.getByText("Indexed capability-skill")).toBeVisible();
+
+      await page.getByLabel("Generation provider").selectOption({ label: "No Capability Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "capability-skill" });
+      await page.getByLabel("Image prompt").fill("This request should be blocked by provider capabilities.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("Provider profile must include image-generate and tools capabilities")).toBeVisible();
+      expect(mock.requests).toHaveLength(0);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("marks generation failed when upstream returns a non-image payload", async ({ page }) => {
+    const mock = await startResponsesMock({ outputBytes: Buffer.from("plain text is not an image") });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Non Image Mock Provider",
+        baseUrl: mock.baseUrl,
+        model: "gpt-mock-non-image",
+        apiKey: "mock-secret-key"
+      });
+      const skillPath = await writeSkillFile("non-image-skill.md", `---
+name: non-image-skill
+description: Valid skill for non-image rejection.
+---
+
+# Non Image Skill
+`);
+      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByRole("button", { name: "Upload Skill" }).click();
+      await expect(page.getByText("Indexed non-image-skill")).toBeVisible();
+
+      await page.getByLabel("Generation provider").selectOption({ label: "Non Image Mock Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "non-image-skill" });
+      await page.getByLabel("Image prompt").fill("This request should fail after upstream.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("Job failed")).toBeVisible();
+      await expect(page.getByText("Image generation result was not a supported image payload.")).toBeVisible();
+    } finally {
+      await mock.close();
+    }
+  });
 });
 
 async function currentWorkspaceId(page: Page): Promise<string> {
@@ -421,13 +535,41 @@ async function uploadSkillViaGraphql(
 
 async function createProviderProfile(
   page: Page,
-  input: { name: string; baseUrl: string; model: string; apiKey: string }
+  input: { name: string; baseUrl: string; model: string; apiKey: string; capabilities?: string[] }
 ): Promise<void> {
-  await page.getByLabel("Provider name").fill(input.name);
-  await page.getByLabel("Base URL").fill(input.baseUrl);
-  await page.getByLabel("Default model").fill(input.model);
-  await page.getByLabel("API key").fill(input.apiKey);
-  await page.getByRole("button", { name: "Save Provider" }).click();
+  await page.evaluate(async (providerInput) => {
+    const workspaceResponse = await fetch("http://localhost:4000/graphql", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "{ workspacesForCurrentUser { id } }" })
+    });
+    const workspaceJson = await workspaceResponse.json();
+    const workspaceId = workspaceJson.data.workspacesForCurrentUser[0].id as string;
+    await fetch("http://localhost:4000/graphql", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `mutation CreateProviderProfile($input: ProviderProfileInput!) {
+          createProviderProfile(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            workspaceId,
+            displayName: providerInput.name,
+            providerType: "OPENAI_COMPATIBLE",
+            baseUrl: providerInput.baseUrl,
+            defaultModel: providerInput.model,
+            defaultImageModel: providerInput.model,
+            capabilities: providerInput.capabilities ?? ["image-generate", "tools"],
+            apiKey: providerInput.apiKey
+          }
+        }
+      })
+    });
+  }, input);
+  await page.reload();
   await expect(page.locator(".table-row").filter({ hasText: input.name })).toBeVisible();
 }
 

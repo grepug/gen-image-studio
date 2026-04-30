@@ -118,11 +118,38 @@ export class ResponsesImageClient {
       ].filter(Boolean);
       throw new ImageGenerationTransportError(details.join(" "), true);
     }
+    if (!this.isCanonicalBase64(resultBase64)) {
+      throw new ImageGenerationTransportError("Image generation result must be canonical base64.", false);
+    }
+    const imageBytes = Buffer.from(resultBase64, "base64");
+    if (!this.isSupportedImage(imageBytes)) {
+      throw new ImageGenerationTransportError("Image generation result was not a supported image payload.", false);
+    }
 
     return {
-      imageBytes: Buffer.from(resultBase64, "base64"),
+      imageBytes,
       seenEvents
     };
+  }
+
+  private isCanonicalBase64(value: string): boolean {
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+      return false;
+    }
+    return Buffer.from(value, "base64").toString("base64") === value;
+  }
+
+  private isSupportedImage(bytes: Buffer): boolean {
+    if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+      return true;
+    }
+    if (bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
+      return true;
+    }
+    if (bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a") {
+      return true;
+    }
+    return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
   }
 
   private parseJsonEvent(data: string): Record<string, unknown> | undefined {

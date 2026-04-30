@@ -55,7 +55,9 @@ export class JobsService {
     if (provider.workspaceId !== parsed.workspaceId) {
       throw new ForbiddenException("Provider profile is not in this workspace");
     }
+    this.assertProviderCanGenerateImages(provider.capabilities);
     const skill = await this.getLatestValidSkillArchive(parsed.workspaceId, parsed.skillId);
+    this.assertSkillCanGenerateImages(skill.version.permissions);
     const skillMd = await readFile(this.assetPath(skill.asset.storagePath), "utf8");
     const fullPrompt = this.buildGenerationPrompt(skillMd, parsed.prompt);
 
@@ -130,6 +132,18 @@ export class JobsService {
     return row;
   }
 
+  private assertProviderCanGenerateImages(capabilities: string[]) {
+    if (!capabilities.includes("image-generate") || !capabilities.includes("tools")) {
+      throw new BadRequestException("Provider profile must include image-generate and tools capabilities");
+    }
+  }
+
+  private assertSkillCanGenerateImages(permissions: string[]) {
+    if (!permissions.includes("use-provider") || !permissions.includes("write-workspace-assets")) {
+      throw new BadRequestException("Skill must request use-provider and write-workspace-assets permissions");
+    }
+  }
+
   private buildGenerationPrompt(skillMd: string, userPrompt: string): string {
     return [
       "Use the following Agent Skill instructions for this image generation request.",
@@ -146,6 +160,9 @@ export class JobsService {
   private async writeOutputAsset(workspaceId: string, ownerId: string, bytes: Buffer) {
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const mimeType = this.sniffImageMimeType(bytes);
+    if (mimeType === "application/octet-stream") {
+      throw new ImageGenerationTransportError("Image generation result was not a supported image payload.", false);
+    }
     const extension = this.extensionForMimeType(mimeType);
     const storagePath = `output-images/${sha256}.${extension}`;
     const outputDir = join(this.assetRoot(), "output-images");
