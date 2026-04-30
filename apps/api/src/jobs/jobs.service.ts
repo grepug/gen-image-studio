@@ -129,7 +129,21 @@ export class JobsService {
     if (row.version.validationStatus !== "valid") {
       throw new BadRequestException("Skill must have a valid latest version before generation");
     }
-    return row;
+    if (!row.version.directoryAssetId) {
+      return row;
+    }
+    const [directoryAsset] = await this.db
+      .select()
+      .from(assets)
+      .where(eq(assets.id, row.version.directoryAssetId))
+      .limit(1);
+    if (!directoryAsset) {
+      throw new BadRequestException("Skill package instructions asset is missing");
+    }
+    return {
+      ...row,
+      asset: directoryAsset
+    };
   }
 
   private assertProviderCanGenerateImages(capabilities: string[]) {

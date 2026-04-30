@@ -1,9 +1,11 @@
 import { expect, Locator, Page, test } from "@playwright/test";
+import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { deflateRawSync } from "node:zlib";
 
 const accounts = [
   { email: "tester1@example.test", password: "test-password-1", displayName: "Tester 1" },
@@ -258,7 +260,7 @@ description: Scoped job skill.
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
   });
 
-  test("indexes a valid Agent Skill from an uploaded SKILL.md file", async ({ page }) => {
+  test("indexes a valid Agent Skill from an uploaded Skill file", async ({ page }) => {
     await login(page);
     const filePath = await writeSkillFile("valid-skill.md", `---
 name: e2e-image-skill
@@ -268,7 +270,7 @@ version: 2.0.0
 
 # E2E Image Skill
 `);
-    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByLabel("Skill file").setInputFiles(filePath);
     await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("Indexed e2e-image-skill")).toBeVisible();
@@ -276,11 +278,69 @@ version: 2.0.0
     await expectStoredSkillArchive(filePath);
   });
 
+  test("indexes a zipped Agent Skill package and generates from its SKILL.md", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Zip Skill Provider",
+        baseUrl: mock.baseUrl,
+        model: "zip-skill-model",
+        apiKey: "mock-secret-key"
+      });
+      const zippedSkillMd = `---
+name: zipped-image-skill
+description: Skill packaged as a folder.
+version: 1.2.3
+---
+
+# Zipped Image Skill
+
+Always render a polished packaged skill image.
+`;
+      const zipPath = await writeZipSkillFile("zipped-image-skill.zip", {
+        "zipped-image-skill/SKILL.md": zippedSkillMd,
+        "zipped-image-skill/references/style.md": "# Style notes"
+      });
+
+      await page.getByLabel("Skill file").setInputFiles(zipPath);
+      await page.getByRole("button", { name: "Upload Skill" }).click();
+      await expect(page.getByText("Indexed zipped-image-skill")).toBeVisible();
+      await expect(page.locator(".skill-item").filter({ hasText: "zipped-image-skill" })).toBeVisible();
+      await expectStoredSkillArchive(zipPath, "zip");
+      await expectStoredSkillDirectory(zipPath, zippedSkillMd);
+
+      const prompt = `Use the zipped package instructions ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Zip Skill Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "zipped-image-skill" });
+      await page.getByLabel("Image prompt").fill(prompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect.poll(() => mock.requests.length).toBe(1);
+      expect(mock.requests[0]?.body.input).toContain("zipped-image-skill");
+      expect(mock.requests[0]?.body.input).toContain("Always render a polished packaged skill image.");
+      expect(mock.requests[0]?.body.input).toContain(prompt);
+      await expect(page.getByLabel("Generation history")).toContainText(prompt);
+      await expect(page.getByAltText("generated-image generated image").first()).toBeVisible();
+
+      const emptyMimeUpload = await uploadZipSkillViaGraphql(page, await currentWorkspaceId(page), "empty-mime-package.zip", {
+        "SKILL.md": validSkillMarkdown("empty-mime-package")
+      }, "");
+      expect(emptyMimeUpload.data?.uploadSkill.skill.id).toBeTruthy();
+    } finally {
+      await mock.close();
+    }
+  });
+
   test("shows validation errors for an invalid Agent Skill file", async ({ page }) => {
     await login(page);
     const filePath = await writeSkillFile("invalid-skill.md", "# No frontmatter here");
 
-    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByLabel("Skill file").setInputFiles(filePath);
     await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("SKILL.md must start with YAML frontmatter")).toBeVisible();
@@ -360,6 +420,63 @@ description: Hash mismatch check.
     expect(invalidBase64.errors?.[0]?.message).toContain("canonical base64");
   });
 
+  test("rejects invalid zipped Agent Skill packages", async ({ page }) => {
+    await login(page);
+    const workspaceId = await currentWorkspaceId(page);
+    const missingSkill = await uploadZipSkillViaGraphql(page, workspaceId, "missing-skill.zip", {
+      "package/readme.md": "# No skill"
+    });
+    expect(missingSkill.errors?.[0]?.message).toContain("contain SKILL.md");
+
+    const duplicateSkill = await uploadZipSkillViaGraphql(page, workspaceId, "duplicate-skill.zip", {
+      "SKILL.md": validSkillMarkdown("duplicate-root"),
+      "package/SKILL.md": validSkillMarkdown("duplicate-nested")
+    });
+    expect(duplicateSkill.errors?.[0]?.message).toContain("exactly one SKILL.md");
+
+    const traversalSkill = await uploadZipSkillViaGraphql(page, workspaceId, "traversal-skill.zip", {
+      "../SKILL.md": validSkillMarkdown("traversal-skill")
+    });
+    expect(traversalSkill.errors?.[0]?.message).toContain("safe relative paths");
+
+    const oversizedBytes = createZipBytes({ "SKILL.md": validSkillMarkdown("oversized-zip") });
+    const oversized = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(oversizedBytes).digest("hex"),
+      fileName: "oversized-zip.zip",
+      mimeType: "application/zip",
+      byteSize: 512 * 1024 + 1,
+      contentBase64: oversizedBytes.toString("base64")
+    });
+    expect(oversized.errors?.[0]?.message).toContain("512KB");
+
+    const compressedBombBytes = createZipBytes({
+      "SKILL.md": validSkillMarkdown("compressed-bomb"),
+      "references/huge.txt": "0".repeat(2 * 1024 * 1024 + 1)
+    });
+    expect(compressedBombBytes.length).toBeLessThan(512 * 1024);
+    const compressedBomb = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(compressedBombBytes).digest("hex"),
+      fileName: "compressed-bomb.zip",
+      mimeType: "application/zip",
+      byteSize: compressedBombBytes.length,
+      contentBase64: compressedBombBytes.toString("base64")
+    });
+    expect(compressedBomb.errors?.[0]?.message).toContain("2MB");
+
+    const spoofedSkillMdBytes = createSpoofedDeflateZip("SKILL.md", Buffer.alloc(1024 * 1024, "A"), 128);
+    const spoofedSkillMd = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(spoofedSkillMdBytes).digest("hex"),
+      fileName: "spoofed-skill-md.zip",
+      mimeType: "application/zip",
+      byteSize: spoofedSkillMdBytes.length,
+      contentBase64: spoofedSkillMdBytes.toString("base64")
+    });
+    expect(spoofedSkillMd.errors?.[0]?.message).toContain("allowed extracted size");
+  });
+
   test("runs an uploaded Agent Skill through a gen-gallery compatible responses stream", async ({ page }) => {
     const outputBytes = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
@@ -383,7 +500,7 @@ description: Drives the mock generation request.
 
 Always produce a sharp product image.
 `);
-      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed mock-generation-skill")).toBeVisible();
 
@@ -437,7 +554,7 @@ description: Drives the mock failed generation request.
 
 # Mock Failure Skill
 `);
-      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed mock-failure-skill")).toBeVisible();
 
@@ -635,7 +752,7 @@ description: Valid skill for capability rejection.
 
 # Capability Skill
 `);
-      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed capability-skill")).toBeVisible();
 
@@ -668,7 +785,7 @@ description: Valid skill for non-image rejection.
 
 # Non Image Skill
 `);
-      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed non-image-skill")).toBeVisible();
 
@@ -708,11 +825,18 @@ async function writeSkillFile(name: string, content: string): Promise<string> {
   return path;
 }
 
-async function expectStoredSkillArchive(filePath: string): Promise<void> {
+async function expectStoredSkillArchive(filePath: string, extension = "md"): Promise<void> {
   const bytes = await readFile(filePath);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-archives", `${sha256}.md`));
+  const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-archives", `${sha256}.${extension}`));
   expect(storedBytes.equals(bytes)).toBe(true);
+}
+
+async function expectStoredSkillDirectory(zipPath: string, skillMdContent: string): Promise<void> {
+  const archiveBytes = await readFile(zipPath);
+  const archiveSha256 = createHash("sha256").update(archiveBytes).digest("hex");
+  const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-directories", archiveSha256, "SKILL.md"));
+  expect(storedBytes.equals(Buffer.from(skillMdContent))).toBe(true);
 }
 
 async function uploadSkillViaGraphql(
@@ -800,11 +924,89 @@ async function activeWorkspaceId(page: Page): Promise<string> {
 async function uploadSkillFromUi(page: Page, fileName: string, content: string): Promise<void> {
   const filePath = await writeSkillFile(fileName, content);
   const skillName = content.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-  await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+  await page.getByLabel("Skill file").setInputFiles(filePath);
   await page.getByRole("button", { name: "Upload Skill" }).click();
   if (skillName) {
     await expect(page.getByText(`Indexed ${skillName}`)).toBeVisible();
   }
+}
+
+async function writeZipSkillFile(name: string, entries: Record<string, string>): Promise<string> {
+  const dir = join(process.cwd(), "test-results", "skill-fixtures");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, createZipBytes(entries));
+  return path;
+}
+
+async function uploadZipSkillViaGraphql(
+  page: Page,
+  workspaceId: string,
+  fileName: string,
+  entries: Record<string, string>,
+  mimeType = "application/zip"
+): Promise<{ data?: { uploadSkill: { skill: { id: string } } }; errors?: { message: string }[] }> {
+  const bytes = createZipBytes(entries);
+  return uploadSkillViaGraphql(page, {
+    workspaceId,
+    archiveSha256: createHash("sha256").update(bytes).digest("hex"),
+    fileName,
+    mimeType,
+    byteSize: bytes.length,
+    contentBase64: bytes.toString("base64")
+  });
+}
+
+function createZipBytes(entries: Record<string, string>): Buffer {
+  const encoded = Object.fromEntries(Object.entries(entries).map(([name, content]) => [name, strToU8(content)]));
+  return Buffer.from(zipSync(encoded));
+}
+
+function createSpoofedDeflateZip(fileName: string, content: Buffer, reportedUncompressedSize: number): Buffer {
+  const name = Buffer.from(fileName);
+  const compressed = deflateRawSync(content);
+  const crc32 = 0;
+  const localHeader = Buffer.alloc(30);
+  localHeader.writeUInt32LE(0x04034b50, 0);
+  localHeader.writeUInt16LE(20, 4);
+  localHeader.writeUInt16LE(0, 6);
+  localHeader.writeUInt16LE(8, 8);
+  localHeader.writeUInt32LE(crc32, 14);
+  localHeader.writeUInt32LE(compressed.length, 18);
+  localHeader.writeUInt32LE(reportedUncompressedSize, 22);
+  localHeader.writeUInt16LE(name.length, 26);
+
+  const centralDirectory = Buffer.alloc(46);
+  centralDirectory.writeUInt32LE(0x02014b50, 0);
+  centralDirectory.writeUInt16LE(20, 4);
+  centralDirectory.writeUInt16LE(20, 6);
+  centralDirectory.writeUInt16LE(0, 8);
+  centralDirectory.writeUInt16LE(8, 10);
+  centralDirectory.writeUInt32LE(crc32, 16);
+  centralDirectory.writeUInt32LE(compressed.length, 20);
+  centralDirectory.writeUInt32LE(reportedUncompressedSize, 24);
+  centralDirectory.writeUInt16LE(name.length, 28);
+
+  const centralDirectoryOffset = localHeader.length + name.length + compressed.length;
+  const centralDirectorySize = centralDirectory.length + name.length;
+  const endOfCentralDirectory = Buffer.alloc(22);
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
+  endOfCentralDirectory.writeUInt16LE(1, 8);
+  endOfCentralDirectory.writeUInt16LE(1, 10);
+  endOfCentralDirectory.writeUInt32LE(centralDirectorySize, 12);
+  endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
+
+  return Buffer.concat([localHeader, name, compressed, centralDirectory, name, endOfCentralDirectory]);
+}
+
+function validSkillMarkdown(name: string): string {
+  return `---
+name: ${name}
+description: Valid zipped skill.
+---
+
+# ${name}
+`;
 }
 
 async function fetchElementImage(page: Page, locator: Locator) {
