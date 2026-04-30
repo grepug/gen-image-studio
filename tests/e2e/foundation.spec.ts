@@ -251,6 +251,7 @@ description: Scoped job skill.
     await page.getByLabel("Provider name").fill("Workspace Image Provider");
     await page.getByLabel("Base URL").fill("https://models.example.test/v1");
     await page.getByLabel("Default model").fill("gpt-image-workspace");
+    await page.getByLabel("Image tool model").fill("gpt-image-workspace");
     await page.getByLabel("API key").fill("super-secret-e2e-key");
     await page.getByRole("button", { name: "Save Provider" }).click();
 
@@ -258,6 +259,111 @@ description: Scoped job skill.
     await expect(page.getByText("https://models.example.test/v1")).toBeVisible();
     await expect(page.getByText("gpt-image-workspace")).toBeVisible();
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
+  });
+
+  test("updates and deletes a workspace provider profile", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Editable Provider",
+        baseUrl: "http://127.0.0.1:1/v1",
+        model: "old-model",
+        apiKey: "old-secret-key"
+      });
+      await uploadSkillFromUi(page, "editable-provider-skill.md", `---
+name: editable-provider-skill
+description: Skill for updated provider profile.
+---
+
+# Editable Provider Skill
+`);
+
+      const providerRow = page.locator(".table-row").filter({ hasText: "Editable Provider" });
+      await providerRow.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Provider name").fill("Updated Provider");
+      await page.getByLabel("Base URL").fill(mock.baseUrl);
+      await page.getByLabel("Default model").fill("updated-text-model");
+      await page.getByLabel("Image tool model").fill("updated-image-model");
+      await page.getByLabel("API key").fill("updated-secret-key");
+      await page.getByRole("button", { name: "Update Provider" }).click();
+
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider" })).toBeVisible();
+      await expect(page.getByText("updated-image-model")).toBeVisible();
+      await expect(page.getByText("updated-secret-key")).toHaveCount(0);
+
+      const prompt = `Use the updated provider ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
+      await page.getByLabel("Image prompt").fill(prompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(1);
+      expect(mock.requests[0]?.headers.authorization).toBe("Bearer updated-secret-key");
+      expect(mock.requests[0]?.body.model).toBe("updated-text-model");
+      expect(mock.requests[0]?.body.tools).toEqual([
+        { type: "image_generation", model: "updated-image-model", action: "generate" }
+      ]);
+
+      await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Provider name").fill("Updated Provider No Key Rotation");
+      await page.getByLabel("Default model").fill("second-text-model");
+      await page.getByLabel("Image tool model").fill("second-image-model");
+      await page.getByLabel("API key").fill("");
+      await page.getByRole("button", { name: "Update Provider" }).click();
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toBeVisible();
+
+      const secondPrompt = `Keep the existing provider key ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider No Key Rotation" });
+      await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
+      await page.getByLabel("Image prompt").fill(secondPrompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(2);
+      expect(mock.requests[1]?.headers.authorization).toBe("Bearer updated-secret-key");
+      expect(mock.requests[1]?.body.model).toBe("second-text-model");
+      expect(mock.requests[1]?.body.tools).toEqual([
+        { type: "image_generation", model: "second-image-model", action: "generate" }
+      ]);
+
+      await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
+      await page.getByRole("button", { name: "Delete Provider" }).click();
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toHaveCount(0);
+      await expect(page.getByLabel("Generation provider")).toHaveValue("");
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("blocks workspace viewers from editing provider profiles", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[1]);
+    await signOut(page);
+    await login(page, accounts[0]);
+    await createProviderProfile(page, {
+      name: "Viewer Protected Provider",
+      baseUrl: "http://127.0.0.1:1/v1",
+      model: "viewer-protected-model",
+      apiKey: "viewer-protected-key"
+    });
+    await page.getByLabel("Member email").fill(accounts[1].email);
+    await page.getByLabel("New member role").selectOption("viewer");
+    await page.getByRole("button", { name: "Add Member" }).click();
+    const ownerWorkspaceId = await currentWorkspaceId(page);
+
+    await signOut(page);
+    await login(page, accounts[1]);
+    await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+    await expect(page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" })).toBeVisible();
+    await page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" }).getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Provider name").fill("Viewer Mutated Provider");
+    await page.getByRole("button", { name: "Update Provider" }).click();
+    await expect(page.getByText("User cannot manage workspace providers")).toBeVisible();
+
+    await page.getByRole("button", { name: "Delete Provider" }).click();
+    await expect(page.getByText("User cannot manage workspace providers")).toBeVisible();
   });
 
   test("indexes a valid Agent Skill from an uploaded Skill file", async ({ page }) => {

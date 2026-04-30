@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { Inject } from "@nestjs/common";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -8,7 +8,7 @@ import { providerProfiles } from "../db/schema";
 import { AppDb } from "../db/types";
 import { isoNow } from "../common/date";
 import { WorkspacesService } from "../workspaces/workspaces.service";
-import { ProviderProfile, ProviderProfileInput, ProviderTypeGql } from "./provider-profile.types";
+import { ProviderProfile, ProviderProfileInput, ProviderProfileUpdateInput, ProviderTypeGql } from "./provider-profile.types";
 
 const providerProfileInputSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -20,6 +20,17 @@ const providerProfileInputSchema = z.object({
   capabilities: z.array(z.string()),
   apiKey: z.string().min(1)
 });
+
+const providerProfileUpdateSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string().min(1).max(80),
+  baseUrl: z.string().url(),
+  defaultModel: z.string().min(1).max(120),
+  defaultImageModel: z.string().min(1).max(120).optional(),
+  capabilities: z.array(z.string()),
+  apiKey: z.string().min(1).nullish()
+});
+const providerProfileIdSchema = z.string().uuid();
 
 type StoredProviderProfile = ProviderProfile & {
   encryptedApiKey: string;
@@ -33,7 +44,7 @@ export class ProviderProfilesService {
   ) {}
 
   async create(input: ProviderProfileInput, userId: string): Promise<ProviderProfile> {
-    await this.assertWorkspaceMember(input.workspaceId, userId);
+    await this.assertCanWriteProviders(input.workspaceId, userId);
     providerProfileInputSchema.parse({
       ...input,
       providerType: "openai-compatible"
@@ -67,6 +78,43 @@ export class ProviderProfilesService {
     return rows.map((row) => this.toProviderProfile(row));
   }
 
+  async update(input: ProviderProfileUpdateInput, userId: string): Promise<ProviderProfile> {
+    const parsed = providerProfileUpdateSchema.parse(input);
+    const existing = await this.getStored(parsed.id);
+    if (!existing) {
+      throw new NotFoundException("Provider profile not found");
+    }
+    await this.assertCanWriteProviders(existing.workspaceId, userId);
+    const [profile] = await this.db
+      .update(providerProfiles)
+      .set({
+        displayName: parsed.displayName,
+        baseUrl: parsed.baseUrl,
+        defaultModel: parsed.defaultModel,
+        defaultImageModel: parsed.defaultImageModel,
+        capabilities: parsed.capabilities,
+        ...(parsed.apiKey ? { encryptedApiKey: this.encryptForStorage(parsed.apiKey) } : {}),
+        updatedAt: new Date()
+      })
+      .where(eq(providerProfiles.id, parsed.id))
+      .returning();
+    if (!profile) {
+      throw new Error("Provider profile update failed");
+    }
+    return this.toProviderProfile(profile);
+  }
+
+  async delete(id: string, userId: string): Promise<boolean> {
+    const providerId = providerProfileIdSchema.parse(id);
+    const [profile] = await this.db.select().from(providerProfiles).where(eq(providerProfiles.id, providerId)).limit(1);
+    if (!profile) {
+      throw new NotFoundException("Provider profile not found");
+    }
+    await this.assertCanWriteProviders(profile.workspaceId, userId);
+    await this.db.delete(providerProfiles).where(eq(providerProfiles.id, providerId));
+    return true;
+  }
+
   async getStored(id: string): Promise<StoredProviderProfile | undefined> {
     const [profile] = await this.db
       .select()
@@ -86,6 +134,10 @@ export class ProviderProfilesService {
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
     await this.workspaces.assertMember(workspaceId, userId);
+  }
+
+  private async assertCanWriteProviders(workspaceId: string, userId: string): Promise<void> {
+    await this.workspaces.assertCanWriteProviders(workspaceId, userId);
   }
 
   private encryptForStorage(value: string): string {

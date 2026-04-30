@@ -162,6 +162,27 @@ export const CREATE_PROVIDER_PROFILE = gql`
   }
 `;
 
+export const UPDATE_PROVIDER_PROFILE = gql`
+  mutation UpdateProviderProfile($input: ProviderProfileUpdateInput!) {
+    updateProviderProfile(input: $input) {
+      id
+      displayName
+      providerType
+      baseUrl
+      defaultModel
+      defaultImageModel
+      capabilities
+      hasApiKey
+    }
+  }
+`;
+
+export const DELETE_PROVIDER_PROFILE = gql`
+  mutation DeleteProviderProfile($id: String!) {
+    deleteProviderProfile(id: $id)
+  }
+`;
+
 export const RUN_IMAGE_GENERATION_JOB = gql`
   mutation RunImageGenerationJob($input: RunImageGenerationJobInput!) {
     runImageGenerationJob(input: $input) {
