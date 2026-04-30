@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { Inject } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DB } from "../db/db.module";
 import { assets, skills, skillVersions } from "../db/schema";
@@ -48,7 +49,7 @@ export class SkillsService {
           workspaceId: input.workspaceId,
           ownerId: userId,
           name,
-          slug: `${this.slugify(name)}-${Date.now().toString(36)}`,
+          slug: `${this.slugify(name)}-${randomUUID().slice(0, 8)}`,
           status: "active"
         })
         .returning();
@@ -98,11 +99,12 @@ export class SkillsService {
   }
 
   private slugify(value: string): string {
-    return value
+    const slug = value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80);
+    return slug || "skill";
   }
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
