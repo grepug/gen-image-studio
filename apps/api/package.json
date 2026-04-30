@@ -1,0 +1,44 @@
+{
+  "name": "@gen-image-studio/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^1.1.9",
+    "@apollo/server": "^4.11.3",
+    "@gen-image-studio/shared": "workspace:*",
+    "@nestjs/apollo": "^12.2.2",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/graphql": "^12.2.2",
+    "@nestjs/platform-express": "^10.4.15",
+    "@simplewebauthn/server": "^13.1.1",
+    "ai": "^4.1.16",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.38.4",
+    "graphql": "^16.10.0",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
+

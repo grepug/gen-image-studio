@@ -1,0 +1,358 @@
+import { useMutation, useQuery } from "@apollo/client";
+import { Button } from "@base-ui/react/button";
+import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
+import { FormEvent, useMemo, useState } from "react";
+import {
+  CREATE_PROVIDER_PROFILE,
+  DASHBOARD_QUERY,
+  LOGIN_WITH_PASSWORD,
+  PROVIDER_PROFILES_QUERY,
+  SKILLS_QUERY,
+  UPLOAD_SKILL
+} from "./graphql";
+
+interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface ProviderProfile {
+  id: string;
+  displayName: string;
+  baseUrl: string;
+  defaultModel: string;
+  defaultImageModel?: string;
+  capabilities: string[];
+  hasApiKey: boolean;
+}
+
+interface Skill {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+}
+
+interface DashboardData {
+  currentUser: {
+    id: string;
+    displayName: string;
+  };
+  workspacesForCurrentUser: Workspace[];
+}
+
+interface ProviderProfilesData {
+  providerProfiles: ProviderProfile[];
+}
+
+interface SkillsData {
+  skills: Skill[];
+}
+
+interface LoggedInUser {
+  userId: string;
+  displayName: string;
+  email: string;
+}
+
+export function App() {
+  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(() => {
+    const raw = localStorage.getItem("gen-image-studio:user");
+    return raw ? (JSON.parse(raw) as LoggedInUser) : null;
+  });
+  const [email, setEmail] = useState("tester1@example.test");
+  const [password, setPassword] = useState("test-password-1");
+  const [providerName, setProviderName] = useState("Local OpenAI Compatible");
+  const [providerBaseUrl, setProviderBaseUrl] = useState("https://api.example.test/v1");
+  const [providerModel, setProviderModel] = useState("gpt-image-test");
+  const [providerApiKey, setProviderApiKey] = useState("test-key");
+  const [skillMd, setSkillMd] = useState(`---
+name: studio-image-style
+description: Creates images in the workspace house style.
+version: 0.1.0
+---
+
+# Studio Image Style
+`);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [loginWithPassword, loginState] = useMutation(LOGIN_WITH_PASSWORD);
+  const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
+  const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
+  const dashboard = useQuery<DashboardData>(DASHBOARD_QUERY, {
+    skip: !loggedInUser
+  });
+  const activeWorkspace = dashboard.data?.workspacesForCurrentUser[0];
+  const providers = useQuery<ProviderProfilesData>(PROVIDER_PROFILES_QUERY, {
+    variables: { workspaceId: activeWorkspace?.id ?? "" },
+    skip: !activeWorkspace
+  });
+  const skills = useQuery<SkillsData>(SKILLS_QUERY, {
+    variables: { workspaceId: activeWorkspace?.id ?? "" },
+    skip: !activeWorkspace
+  });
+
+  const providerRows = providers.data?.providerProfiles ?? [];
+  const skillRows = skills.data?.skills ?? [];
+  const currentUserName = loggedInUser?.displayName ?? dashboard.data?.currentUser.displayName ?? "Loading user";
+  const loginError = loginState.error?.message;
+  const providerError = providerMutation.error?.message;
+  const skillResult = skillMutation.data?.uploadSkill;
+  const skillErrors = useMemo(() => skillResult?.version.validationErrors ?? [], [skillResult]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoginMessage(null);
+    const result = await loginWithPassword({ variables: { email, password } });
+    const user = result.data?.loginWithPassword as LoggedInUser | undefined;
+    if (user) {
+      localStorage.setItem("gen-image-studio:user", JSON.stringify(user));
+      setLoggedInUser(user);
+      return;
+    }
+    setLoginMessage("Invalid test login credentials");
+  }
+
+  async function handleProviderSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeWorkspace) return;
+    await createProviderProfile({
+      variables: {
+        input: {
+          workspaceId: activeWorkspace.id,
+          displayName: providerName,
+          providerType: "OPENAI_COMPATIBLE",
+          baseUrl: providerBaseUrl,
+          defaultModel: providerModel,
+          defaultImageModel: providerModel,
+          capabilities: ["image-generate", "tools"],
+          apiKey: providerApiKey
+        }
+      },
+      refetchQueries: [{ query: PROVIDER_PROFILES_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+    setProviderApiKey("");
+  }
+
+  async function handleSkillSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeWorkspace) return;
+    await uploadSkill({
+      variables: {
+        input: {
+          workspaceId: activeWorkspace.id,
+          archiveSha256: "e2e-skill-archive",
+          skillMdContent: skillMd,
+          permissions: ["use-provider", "write-workspace-assets"]
+        }
+      },
+      refetchQueries: [{ query: SKILLS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+  }
+
+  if (!loggedInUser) {
+    return (
+      <main className="login-page">
+        <form className="login-panel" onSubmit={handleLogin}>
+          <div className="brand login-brand">
+            <div className="brand-mark">GI</div>
+            <div>
+              <strong>Gen Image Studio</strong>
+              <span>Local workspace login</span>
+            </div>
+          </div>
+          <h1 className="login-title">Gen Image Studio</h1>
+          <label>
+            Email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} name="email" />
+          </label>
+          <label>
+            Password
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              name="password"
+              type="password"
+            />
+          </label>
+          {loginError || loginMessage ? <p className="error-text">{loginError ?? loginMessage}</p> : null}
+          <Button className="primary-button" type="submit">
+            <KeyRound size={18} />
+            Sign in
+          </Button>
+        </form>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">GI</div>
+          <div>
+            <strong>Gen Image Studio</strong>
+            <span>Workspace image ops</span>
+          </div>
+        </div>
+
+        <nav className="nav-list" aria-label="Primary">
+          <Button className="nav-item active">
+            <Boxes size={18} />
+            Studio
+          </Button>
+          <Button className="nav-item">
+            <Upload size={18} />
+            Skills
+          </Button>
+          <Button className="nav-item">
+            <KeyRound size={18} />
+            Providers
+          </Button>
+          <Button className="nav-item">
+            <UsersRound size={18} />
+            Members
+          </Button>
+          <Button className="nav-item">
+            <Settings size={18} />
+            Settings
+          </Button>
+        </nav>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">{currentUserName}</p>
+            <h1>{activeWorkspace?.name ?? "Workspace setup"}</h1>
+          </div>
+          <div className="topbar-actions">
+            <Button className="secondary-button">
+              <UsersRound size={18} />
+              Invite
+            </Button>
+            <Button className="primary-button">
+              <Upload size={18} />
+              Upload Skill
+            </Button>
+          </div>
+        </header>
+
+        <div className="content-grid">
+          <section className="panel wide">
+            <div className="panel-header">
+              <div>
+                <h2>Provider Profiles</h2>
+                <p>User-owned endpoints, models, capabilities, and server-only API keys.</p>
+              </div>
+              <Button className="secondary-button">
+                <KeyRound size={18} />
+                Add Provider
+              </Button>
+            </div>
+            <div className="table">
+              <div className="table-row table-head">
+                <span>Name</span>
+                <span>Base URL</span>
+                <span>Model</span>
+                <span>Capabilities</span>
+              </div>
+              {providerRows.length === 0 ? (
+                <div className="empty-row">No provider profiles yet.</div>
+              ) : (
+                providerRows.map((profile) => (
+                  <div className="table-row" key={profile.id}>
+                    <strong>{profile.displayName}</strong>
+                    <span>{profile.baseUrl}</span>
+                    <span>{profile.defaultImageModel ?? profile.defaultModel}</span>
+                    <span>{profile.capabilities.join(", ") || "None"}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <form className="stacked-form" onSubmit={handleProviderSubmit}>
+              <label>
+                Provider name
+                <input value={providerName} onChange={(event) => setProviderName(event.target.value)} />
+              </label>
+              <label>
+                Base URL
+                <input value={providerBaseUrl} onChange={(event) => setProviderBaseUrl(event.target.value)} />
+              </label>
+              <label>
+                Default model
+                <input value={providerModel} onChange={(event) => setProviderModel(event.target.value)} />
+              </label>
+              <label>
+                API key
+                <input value={providerApiKey} onChange={(event) => setProviderApiKey(event.target.value)} type="password" />
+              </label>
+              {providerError ? <p className="error-text">{providerError}</p> : null}
+              <Button className="primary-button" type="submit">
+                Save Provider
+              </Button>
+            </form>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>Agent Skills</h2>
+                <p>Indexed from SKILL.md metadata.</p>
+              </div>
+            </div>
+            <div className="skill-list">
+              {skillRows.length === 0 ? (
+                <div className="empty-block">Upload an Agent Skills package to validate and index it.</div>
+              ) : (
+                skillRows.map((skill) => (
+                  <article className="skill-item" key={skill.id}>
+                    <strong>{skill.name}</strong>
+                    <span>{skill.slug}</span>
+                  </article>
+                ))
+              )}
+            </div>
+            <form className="stacked-form" onSubmit={handleSkillSubmit}>
+              <label>
+                SKILL.md
+                <textarea value={skillMd} onChange={(event) => setSkillMd(event.target.value)} rows={8} />
+              </label>
+              {skillResult ? (
+                <p className={skillErrors.length > 0 ? "error-text" : "success-text"}>
+                  {skillErrors.length > 0 ? skillErrors.join(", ") : `Indexed ${skillResult.version.name}`}
+                </p>
+              ) : null}
+              <Button className="primary-button" type="submit">
+                Validate Skill
+              </Button>
+            </form>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>Workspace Access</h2>
+                <p>Shared resources are scoped by membership.</p>
+              </div>
+            </div>
+            <div className="metric-list">
+              <div>
+                <span>Members</span>
+                <strong>1</strong>
+              </div>
+              <div>
+                <span>Roles</span>
+                <strong>4</strong>
+              </div>
+              <div>
+                <span>Secret exposure</span>
+                <strong>Redacted</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  );
+}
