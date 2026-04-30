@@ -5,6 +5,7 @@ import { GraphQLModule } from "@nestjs/graphql";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
 import { DbModule } from "./db/db.module";
+import { JobsModule } from "./jobs/jobs.module";
 import { ProviderProfilesModule } from "./provider-profiles/provider-profiles.module";
 import { SkillsModule } from "./skills/skills.module";
 import { WorkspacesModule } from "./workspaces/workspaces.module";
@@ -24,7 +25,8 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
     AuthModule,
     ProviderProfilesModule,
     AiModule,
-    SkillsModule
+    SkillsModule,
+    JobsModule
   ]
 })
 export class AppModule {}

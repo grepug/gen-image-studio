@@ -119,6 +119,34 @@ export const SKILLS_QUERY = gql`
   }
 `;
 
+export const GENERATION_JOBS_QUERY = gql`
+  query GenerationJobs($workspaceId: String!) {
+    generationJobs(workspaceId: $workspaceId) {
+      id
+      status
+      prompt
+      createdAt
+      updatedAt
+      events {
+        id
+        type
+        message
+        createdAt
+      }
+      outputs {
+        id
+        assetId
+        label
+        mimeType
+        byteSize
+        sha256
+        storagePath
+        createdAt
+      }
+    }
+  }
+`;
+
 export const CREATE_PROVIDER_PROFILE = gql`
   mutation CreateProviderProfile($input: ProviderProfileInput!) {
     createProviderProfile(input: $input) {
@@ -130,6 +158,30 @@ export const CREATE_PROVIDER_PROFILE = gql`
       defaultImageModel
       capabilities
       hasApiKey
+    }
+  }
+`;
+
+export const RUN_IMAGE_GENERATION_JOB = gql`
+  mutation RunImageGenerationJob($input: RunImageGenerationJobInput!) {
+    runImageGenerationJob(input: $input) {
+      id
+      status
+      prompt
+      events {
+        id
+        type
+        message
+        createdAt
+      }
+      outputs {
+        id
+        label
+        mimeType
+        byteSize
+        sha256
+        storagePath
+      }
     }
   }
 `;

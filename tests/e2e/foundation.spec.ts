@@ -1,6 +1,8 @@
 import { expect, Page, test } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer, Server } from "node:http";
+import { AddressInfo } from "node:net";
 import { join } from "node:path";
 
 const accounts = [
@@ -159,7 +161,7 @@ test.describe("foundation workspace flows", () => {
     await page.getByLabel("API key").fill("super-secret-e2e-key");
     await page.getByRole("button", { name: "Save Provider" }).click();
 
-    await expect(page.getByText("Workspace Image Provider")).toBeVisible();
+    await expect(page.locator(".table-row").filter({ hasText: "Workspace Image Provider" })).toBeVisible();
     await expect(page.getByText("https://models.example.test/v1")).toBeVisible();
     await expect(page.getByText("gpt-image-workspace")).toBeVisible();
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
@@ -266,6 +268,91 @@ description: Hash mismatch check.
     });
     expect(invalidBase64.errors?.[0]?.message).toContain("canonical base64");
   });
+
+  test("runs an uploaded Agent Skill through a gen-gallery compatible responses stream", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Generation Mock Provider",
+        baseUrl: mock.baseUrl,
+        model: "gpt-mock-responses",
+        apiKey: "mock-secret-key"
+      });
+      const skillPath = await writeSkillFile("mock-generation-skill.md", `---
+name: mock-generation-skill
+description: Drives the mock generation request.
+---
+
+# Mock Generation Skill
+
+Always produce a sharp product image.
+`);
+      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByRole("button", { name: "Upload Skill" }).click();
+      await expect(page.getByText("Indexed mock-generation-skill")).toBeVisible();
+
+      await page.getByLabel("Generation provider").selectOption({ label: "Generation Mock Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "mock-generation-skill" });
+      await page.getByLabel("Image prompt").fill("Create a chrome object on a neutral background.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("Job succeeded")).toBeVisible();
+      await expect(page.getByText("generated-image - image/png")).toBeVisible();
+      expect(mock.requests).toHaveLength(1);
+      expect(mock.requests[0]?.headers.authorization).toBe("Bearer mock-secret-key");
+      expect(mock.requests[0]?.body.model).toBe("gpt-mock-responses");
+      expect(mock.requests[0]?.body.stream).toBe(true);
+      expect(mock.requests[0]?.body.input).toContain("mock-generation-skill");
+      expect(mock.requests[0]?.body.input).toContain("Always produce a sharp product image.");
+      expect(mock.requests[0]?.body.input).toContain("Create a chrome object on a neutral background.");
+      expect(mock.requests[0]?.body.tools).toEqual([
+        { type: "image_generation", model: "gpt-mock-responses", action: "generate" }
+      ]);
+      const sha256 = createHash("sha256").update(outputBytes).digest("hex");
+      const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/output-images", `${sha256}.png`));
+      expect(storedBytes.equals(outputBytes)).toBe(true);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("shows a failed generation job when the responses upstream fails", async ({ page }) => {
+    const mock = await startResponsesMock({ status: 500, body: "mock upstream failure" });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Failing Mock Provider",
+        baseUrl: mock.baseUrl,
+        model: "gpt-mock-failure",
+        apiKey: "mock-secret-key"
+      });
+      const skillPath = await writeSkillFile("mock-failure-skill.md", `---
+name: mock-failure-skill
+description: Drives the mock failed generation request.
+---
+
+# Mock Failure Skill
+`);
+      await page.getByLabel("SKILL.md file").setInputFiles(skillPath);
+      await page.getByRole("button", { name: "Upload Skill" }).click();
+      await expect(page.getByText("Indexed mock-failure-skill")).toBeVisible();
+
+      await page.getByLabel("Generation provider").selectOption({ label: "Failing Mock Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "mock-failure-skill" });
+      await page.getByLabel("Image prompt").fill("This request should fail.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("Job failed")).toBeVisible();
+      await expect(page.getByText(/Responses request failed with HTTP 500: mock upstream failure/)).toBeVisible();
+    } finally {
+      await mock.close();
+    }
+  });
 });
 
 async function currentWorkspaceId(page: Page): Promise<string> {
@@ -330,4 +417,73 @@ async function uploadSkillViaGraphql(
     });
     return response.json();
   }, input);
+}
+
+async function createProviderProfile(
+  page: Page,
+  input: { name: string; baseUrl: string; model: string; apiKey: string }
+): Promise<void> {
+  await page.getByLabel("Provider name").fill(input.name);
+  await page.getByLabel("Base URL").fill(input.baseUrl);
+  await page.getByLabel("Default model").fill(input.model);
+  await page.getByLabel("API key").fill(input.apiKey);
+  await page.getByRole("button", { name: "Save Provider" }).click();
+  await expect(page.locator(".table-row").filter({ hasText: input.name })).toBeVisible();
+}
+
+async function startResponsesMock(options: { outputBytes?: Buffer; status?: number; body?: string }): Promise<{
+  baseUrl: string;
+  requests: Array<{ headers: Record<string, string | undefined>; body: Record<string, unknown> }>;
+  close: () => Promise<void>;
+}> {
+  const requests: Array<{ headers: Record<string, string | undefined>; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || !request.url?.endsWith("/responses")) {
+      response.writeHead(404).end("not found");
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    requests.push({
+      headers: {
+        authorization: request.headers.authorization,
+        accept: request.headers.accept,
+        contentType: request.headers["content-type"]
+      },
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+    });
+    if (options.status && options.status >= 400) {
+      response.writeHead(options.status, { "content-type": "text/plain" }).end(options.body ?? "upstream failure");
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write(
+      `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          type: "image_generation_call",
+          result: (options.outputBytes ?? Buffer.from("mock image")).toString("base64")
+        }
+      })}\n\n`
+    );
+    response.end("data: [DONE]\n\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: () => closeServer(server)
+  };
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }

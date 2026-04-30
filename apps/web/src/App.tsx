@@ -9,10 +9,12 @@ import {
   CREATE_PROVIDER_PROFILE,
   FINISH_PASSKEY_AUTHENTICATION,
   FINISH_PASSKEY_REGISTRATION,
+  GENERATION_JOBS_QUERY,
   LOGIN_WITH_PASSWORD,
   LOGOUT,
   PROVIDER_PROFILES_QUERY,
   REMOVE_WORKSPACE_MEMBER,
+  RUN_IMAGE_GENERATION_JOB,
   SKILLS_QUERY,
   START_PASSKEY_AUTHENTICATION,
   START_PASSKEY_REGISTRATION,
@@ -43,6 +45,30 @@ interface Skill {
   name: string;
   slug: string;
   status: string;
+}
+
+interface GenerationJobOutput {
+  id: string;
+  label: string;
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+  storagePath: string;
+}
+
+interface GenerationJobEvent {
+  id: string;
+  type: string;
+  message?: string;
+  createdAt: string;
+}
+
+interface GenerationJob {
+  id: string;
+  status: string;
+  prompt: string;
+  events: GenerationJobEvent[];
+  outputs: GenerationJobOutput[];
 }
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
@@ -79,6 +105,14 @@ interface WorkspaceMembersData {
   workspaceMembers: WorkspaceMember[];
 }
 
+interface GenerationJobsData {
+  generationJobs: GenerationJob[];
+}
+
+interface RunGenerationData {
+  runImageGenerationJob: GenerationJob;
+}
+
 interface LoggedInUser {
   userId: string;
   displayName: string;
@@ -97,6 +131,9 @@ export function App() {
   const [memberRole, setMemberRole] = useState<WorkspaceRole>("member");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [skillFile, setSkillFile] = useState<File | null>(null);
+  const [generationProviderId, setGenerationProviderId] = useState("");
+  const [generationSkillId, setGenerationSkillId] = useState("");
+  const [generationPrompt, setGenerationPrompt] = useState("Create a clean studio image using this skill.");
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
   const currentUserQuery = useQuery<DashboardData>(CURRENT_USER_QUERY, {
@@ -110,6 +147,7 @@ export function App() {
   const [finishPasskeyAuthenticationMutation] = useMutation(FINISH_PASSKEY_AUTHENTICATION);
   const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
   const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
+  const [runGenerationJob, generationMutation] = useMutation<RunGenerationData>(RUN_IMAGE_GENERATION_JOB);
   const [addWorkspaceMember, addMemberMutation] = useMutation(ADD_WORKSPACE_MEMBER);
   const [updateWorkspaceMemberRole, updateMemberMutation] = useMutation(UPDATE_WORKSPACE_MEMBER_ROLE);
   const [removeWorkspaceMember, removeMemberMutation] = useMutation(REMOVE_WORKSPACE_MEMBER);
@@ -132,13 +170,22 @@ export function App() {
     variables: { workspaceId: activeWorkspace?.id ?? "" },
     skip: !activeWorkspace
   });
+  const generationJobs = useQuery<GenerationJobsData>(GENERATION_JOBS_QUERY, {
+    variables: { workspaceId: activeWorkspace?.id ?? "" },
+    skip: !activeWorkspace
+  });
 
   const providerRows = providers.data?.providerProfiles ?? [];
   const skillRows = skills.data?.skills ?? [];
   const memberRows = members.data?.workspaceMembers ?? [];
+  const jobRows = generationJobs.data?.generationJobs ?? [];
+  const selectedProviderId = generationProviderId || providerRows[0]?.id || "";
+  const selectedSkillId = generationSkillId || skillRows[0]?.id || "";
+  const latestJob = generationMutation.data?.runImageGenerationJob ?? jobRows[0];
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
   const providerError = providerMutation.error?.message;
+  const generationError = generationMutation.error?.message;
   const memberError = addMemberMutation.error?.message ?? updateMemberMutation.error?.message ?? removeMemberMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
   const skillErrors = useMemo(() => skillResult?.version.validationErrors ?? [], [skillResult]);
@@ -235,6 +282,22 @@ export function App() {
         }
       },
       refetchQueries: [{ query: SKILLS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+    });
+  }
+
+  async function handleGenerationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeWorkspace || !selectedProviderId || !selectedSkillId) return;
+    await runGenerationJob({
+      variables: {
+        input: {
+          workspaceId: activeWorkspace.id,
+          providerProfileId: selectedProviderId,
+          skillId: selectedSkillId,
+          prompt: generationPrompt
+        }
+      },
+      refetchQueries: [{ query: GENERATION_JOBS_QUERY, variables: { workspaceId: activeWorkspace.id } }]
     });
   }
 
@@ -468,6 +531,66 @@ export function App() {
                 Upload Skill
               </Button>
             </form>
+          </section>
+
+          <section className="panel">
+            <div className="panel-header compact">
+              <div>
+                <h2>Generate Image</h2>
+                <p>Run the selected Agent Skill against a workspace provider.</p>
+              </div>
+            </div>
+            <form className="stacked-form" onSubmit={handleGenerationSubmit}>
+              <label>
+                Generation provider
+                <select
+                  value={selectedProviderId}
+                  onChange={(event) => setGenerationProviderId(event.target.value)}
+                >
+                  {providerRows.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Generation skill
+                <select value={selectedSkillId} onChange={(event) => setGenerationSkillId(event.target.value)}>
+                  {skillRows.map((skill) => (
+                    <option key={skill.id} value={skill.id}>
+                      {skill.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Image prompt
+                <textarea value={generationPrompt} onChange={(event) => setGenerationPrompt(event.target.value)} rows={4} />
+              </label>
+              {generationError ? <p className="error-text">{generationError}</p> : null}
+              <Button className="primary-button" type="submit" disabled={!selectedProviderId || !selectedSkillId || generationMutation.loading}>
+                {generationMutation.loading ? "Running" : "Run Generation"}
+              </Button>
+            </form>
+            {latestJob ? (
+              <div className="job-result" aria-label="Latest generation job">
+                <strong>Job {latestJob.status}</strong>
+                <span>{latestJob.prompt}</span>
+                {latestJob.outputs.map((output) => (
+                  <span key={output.id}>
+                    {output.label} - {output.mimeType} - {output.byteSize} bytes
+                  </span>
+                ))}
+                {latestJob.events
+                  .filter((event) => event.type === "failed" && event.message)
+                  .map((event) => (
+                    <span className="error-text" key={event.id}>
+                      {event.message}
+                    </span>
+                  ))}
+              </div>
+            ) : null}
           </section>
 
           <section className="panel">
