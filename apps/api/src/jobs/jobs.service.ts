@@ -270,7 +270,7 @@ export class JobsService {
       mimeType: asset.mimeType,
       byteSize: asset.byteSize,
       sha256: asset.sha256,
-      storagePath: asset.storagePath,
+      assetUrl: `/assets/${asset.id}/file`,
       createdAt: row.createdAt.toISOString()
     };
   }

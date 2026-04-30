@@ -140,7 +140,7 @@ export const GENERATION_JOBS_QUERY = gql`
         mimeType
         byteSize
         sha256
-        storagePath
+        assetUrl
         createdAt
       }
     }
@@ -181,7 +181,7 @@ export const RUN_IMAGE_GENERATION_JOB = gql`
         mimeType
         byteSize
         sha256
-        storagePath
+        assetUrl
       }
     }
   }
