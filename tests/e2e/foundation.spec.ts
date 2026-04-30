@@ -389,18 +389,20 @@ Always produce a sharp product image.
 
       await page.getByLabel("Generation provider").selectOption({ label: "Generation Mock Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "mock-generation-skill" });
-      await page.getByLabel("Image prompt").fill("Create a chrome object on a neutral background.");
+      const prompt = `Create a chrome object on a neutral background ${Date.now()}.`;
+      await page.getByLabel("Image prompt").fill(prompt);
       await page.getByRole("button", { name: "Run Generation" }).click();
 
-      await expect(page.getByText("Job succeeded")).toBeVisible();
-      await expect(page.getByText("generated-image - image/png")).toBeVisible();
-      expect(mock.requests).toHaveLength(1);
+      await expect.poll(() => mock.requests.length).toBe(1);
+      await expect(page.getByLabel("Latest generation job")).toContainText("Job succeeded");
+      await expect(page.getByLabel("Latest generation job")).toContainText(prompt);
+      await expect(page.getByLabel("Latest generation job")).toContainText("generated-image - image/png");
       expect(mock.requests[0]?.headers.authorization).toBe("Bearer mock-secret-key");
       expect(mock.requests[0]?.body.model).toBe("gpt-mock-responses");
       expect(mock.requests[0]?.body.stream).toBe(true);
       expect(mock.requests[0]?.body.input).toContain("mock-generation-skill");
       expect(mock.requests[0]?.body.input).toContain("Always produce a sharp product image.");
-      expect(mock.requests[0]?.body.input).toContain("Create a chrome object on a neutral background.");
+      expect(mock.requests[0]?.body.input).toContain(prompt);
       expect(mock.requests[0]?.body.tools).toEqual([
         { type: "image_generation", model: "gpt-mock-responses", action: "generate" }
       ]);
