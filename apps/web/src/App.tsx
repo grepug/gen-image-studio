@@ -2,7 +2,7 @@ import { useApolloClient, useMutation, useQuery } from "@apollo/client";
 import { Button } from "@base-ui/react/button";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ADD_WORKSPACE_MEMBER,
   CURRENT_USER_QUERY,
@@ -75,6 +75,7 @@ interface GenerationJob {
 }
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+type WorkspacePanel = "studio" | "skills" | "providers" | "members" | "settings";
 
 interface DashboardData {
   currentUser: {
@@ -124,6 +125,12 @@ interface LoggedInUser {
 
 export function App() {
   const apollo = useApolloClient();
+  const topbarRef = useRef<HTMLElement | null>(null);
+  const providerPanelRef = useRef<HTMLElement | null>(null);
+  const skillPanelRef = useRef<HTMLElement | null>(null);
+  const generationPanelRef = useRef<HTMLElement | null>(null);
+  const memberPanelRef = useRef<HTMLElement | null>(null);
+  const providerNameInputRef = useRef<HTMLInputElement | null>(null);
   const [email, setEmail] = useState("tester1@example.test");
   const [password, setPassword] = useState("test-password-1");
   const [providerName, setProviderName] = useState("Local OpenAI Compatible");
@@ -139,6 +146,7 @@ export function App() {
   const [generationProviderId, setGenerationProviderId] = useState("");
   const [generationSkillId, setGenerationSkillId] = useState("");
   const [generationPrompt, setGenerationPrompt] = useState("Create a clean studio image using this skill.");
+  const [activePanel, setActivePanel] = useState<WorkspacePanel>("studio");
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
   const currentUserQuery = useQuery<DashboardData>(CURRENT_USER_QUERY, {
@@ -305,13 +313,39 @@ export function App() {
     setProviderApiKey("");
   }
 
-  function handleNewProvider() {
+  function handleNewProvider(options: { focusForm?: boolean } = {}) {
     setEditingProviderId("");
     setProviderName("Local OpenAI Compatible");
     setProviderBaseUrl("https://api.example.test/v1");
     setProviderModel("gpt-image-test");
     setProviderImageModel("gpt-image-test");
     setProviderApiKey("test-key");
+    if (options.focusForm) {
+      window.requestAnimationFrame(() => {
+        scrollToPanel("providers", { focusPanel: false });
+        providerNameInputRef.current?.focus();
+      });
+    }
+  }
+
+  function scrollToPanel(panel: WorkspacePanel, options: { focusPanel?: boolean } = {}) {
+    const panelRefs: Record<WorkspacePanel, HTMLElement | null> = {
+      studio: generationPanelRef.current,
+      skills: skillPanelRef.current,
+      providers: providerPanelRef.current,
+      members: memberPanelRef.current,
+      settings: topbarRef.current
+    };
+    const target = panelRefs[panel];
+    setActivePanel(panel);
+    target?.scrollIntoView({ block: "start" });
+    if (options.focusPanel ?? true) {
+      target?.focus({ preventScroll: true });
+    }
+  }
+
+  function navItemClass(panel: WorkspacePanel) {
+    return activePanel === panel ? "nav-item active" : "nav-item";
   }
 
   async function handleDeleteProvider() {
@@ -450,23 +484,23 @@ export function App() {
         </div>
 
         <nav className="nav-list" aria-label="Primary">
-          <Button className="nav-item active">
+          <Button className={navItemClass("studio")} aria-current={activePanel === "studio" ? "location" : undefined} onClick={() => scrollToPanel("studio")}>
             <Boxes size={18} />
             Studio
           </Button>
-          <Button className="nav-item">
+          <Button className={navItemClass("skills")} aria-current={activePanel === "skills" ? "location" : undefined} onClick={() => scrollToPanel("skills")}>
             <Upload size={18} />
             Skills
           </Button>
-          <Button className="nav-item">
+          <Button className={navItemClass("providers")} aria-current={activePanel === "providers" ? "location" : undefined} onClick={() => scrollToPanel("providers")}>
             <KeyRound size={18} />
             Providers
           </Button>
-          <Button className="nav-item">
+          <Button className={navItemClass("members")} aria-current={activePanel === "members" ? "location" : undefined} onClick={() => scrollToPanel("members")}>
             <UsersRound size={18} />
             Members
           </Button>
-          <Button className="nav-item">
+          <Button className={navItemClass("settings")} aria-current={activePanel === "settings" ? "location" : undefined} onClick={() => scrollToPanel("settings")}>
             <Settings size={18} />
             Settings
           </Button>
@@ -474,10 +508,10 @@ export function App() {
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
+        <header className="topbar" id="settings-panel" ref={topbarRef} tabIndex={-1} aria-labelledby="workspace-title">
           <div>
             <p className="eyebrow">{currentUserName}</p>
-            <h1>{activeWorkspace?.name ?? "Workspace setup"}</h1>
+            <h1 id="workspace-title">{activeWorkspace?.name ?? "Workspace setup"}</h1>
             {workspaceRows.length > 1 ? (
               <select
                 aria-label="Active workspace"
@@ -506,13 +540,13 @@ export function App() {
         </header>
 
         <div className="content-grid">
-          <section className="panel wide">
+          <section className="panel wide" id="providers-panel" ref={providerPanelRef} tabIndex={-1} aria-labelledby="providers-title">
             <div className="panel-header">
               <div>
-                <h2>Provider Profiles</h2>
+                <h2 id="providers-title">Provider Profiles</h2>
                 <p>User-owned endpoints, models, capabilities, and server-only API keys.</p>
               </div>
-              <Button className="secondary-button">
+              <Button className="secondary-button" type="button" onClick={() => handleNewProvider({ focusForm: true })}>
                 <KeyRound size={18} />
                 Add Provider
               </Button>
@@ -543,7 +577,7 @@ export function App() {
             <form className="stacked-form" onSubmit={handleProviderSubmit}>
               <label>
                 Provider name
-                <input value={providerName} onChange={(event) => setProviderName(event.target.value)} />
+                <input ref={providerNameInputRef} value={providerName} onChange={(event) => setProviderName(event.target.value)} />
               </label>
               <label>
                 Base URL
@@ -571,7 +605,7 @@ export function App() {
                 <Button className="primary-button" type="submit">
                   {editingProviderId ? "Update Provider" : "Save Provider"}
                 </Button>
-                <Button className="secondary-button" type="button" onClick={handleNewProvider}>
+                <Button className="secondary-button" type="button" onClick={() => handleNewProvider()}>
                   New Provider
                 </Button>
                 {editingProviderId ? (
@@ -583,10 +617,10 @@ export function App() {
             </form>
           </section>
 
-          <section className="panel">
+          <section className="panel" id="skills-panel" ref={skillPanelRef} tabIndex={-1} aria-labelledby="skills-title">
             <div className="panel-header compact">
               <div>
-                <h2>Agent Skills</h2>
+                <h2 id="skills-title">Agent Skills</h2>
                 <p>Indexed from SKILL.md metadata.</p>
               </div>
             </div>
@@ -623,10 +657,10 @@ export function App() {
             </form>
           </section>
 
-          <section className="panel">
+          <section className="panel" id="studio-panel" ref={generationPanelRef} tabIndex={-1} aria-labelledby="studio-title">
             <div className="panel-header compact">
               <div>
-                <h2>Generate Image</h2>
+                <h2 id="studio-title">Generate Image</h2>
                 <p>Run the selected Agent Skill against a workspace provider.</p>
               </div>
             </div>
@@ -702,10 +736,10 @@ export function App() {
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel" id="members-panel" ref={memberPanelRef} tabIndex={-1} aria-labelledby="members-title">
             <div className="panel-header compact">
               <div>
-                <h2>Workspace Access</h2>
+                <h2 id="members-title">Workspace Access</h2>
                 <p>Shared resources are scoped by membership.</p>
               </div>
             </div>
