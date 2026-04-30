@@ -448,7 +448,8 @@ Always render a polished packaged skill image.
 `;
       const zipPath = await writeZipSkillFile("zipped-image-skill.zip", {
         "zipped-image-skill/SKILL.md": zippedSkillMd,
-        "zipped-image-skill/references/style.md": "# Style notes"
+        "zipped-image-skill/references/style.md": "# Style notes\n\nUse emerald rim lighting from the package reference.",
+        "zipped-image-skill/scripts/unsafe.md": "This script text must not enter the prompt."
       });
 
       await page.getByLabel("Skill file").setInputFiles(zipPath);
@@ -467,6 +468,9 @@ Always render a polished packaged skill image.
       await expect.poll(() => mock.requests.length).toBe(1);
       expect(mock.requests[0]?.body.input).toContain("zipped-image-skill");
       expect(mock.requests[0]?.body.input).toContain("Always render a polished packaged skill image.");
+      expect(mock.requests[0]?.body.input).toContain('file path="references/style.md"');
+      expect(mock.requests[0]?.body.input).toContain("Use emerald rim lighting from the package reference.");
+      expect(mock.requests[0]?.body.input).not.toContain("This script text must not enter the prompt.");
       expect(mock.requests[0]?.body.input).toContain(prompt);
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
       await expect(page.getByAltText("generated-image generated image").first()).toBeVisible();

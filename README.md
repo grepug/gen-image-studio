@@ -46,6 +46,7 @@ Initial roles:
 ## Agent Skills
 
 Uploaded skills follow the AI SDK Agent Skills directory model. Each package must include a `SKILL.md` file with frontmatter metadata. The backend indexes metadata and stores the original package/extracted directory reference, but this foundation slice does not execute uploaded code.
+For zipped packages, generation also includes bounded text files from safe support paths such as `references/` and text-like `assets/`; scripts and binary files are not executed or added to prompts.
 
 ## Validation
 
@@ -56,4 +57,3 @@ pnpm build
 ```
 
 CI is intentionally skipped for now.
-
