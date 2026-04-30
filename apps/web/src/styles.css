@@ -192,6 +192,16 @@ button {
   border-color: #d5ddd8;
 }
 
+.compact-button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.danger-button {
+  color: #8d2d23;
+  border-color: #e8c8c2;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
@@ -237,7 +247,7 @@ button {
 
 .table-row {
   display: grid;
-  grid-template-columns: 1fr 1.3fr 1fr 1fr;
+  grid-template-columns: 1fr 1.3fr 1fr 1fr auto;
   gap: 12px;
   align-items: center;
   min-height: 48px;
@@ -277,6 +287,12 @@ button {
   display: grid;
   gap: 12px;
   margin-top: 18px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .stacked-form label,

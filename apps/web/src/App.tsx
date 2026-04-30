@@ -7,6 +7,7 @@ import {
   ADD_WORKSPACE_MEMBER,
   CURRENT_USER_QUERY,
   CREATE_PROVIDER_PROFILE,
+  DELETE_PROVIDER_PROFILE,
   FINISH_PASSKEY_AUTHENTICATION,
   FINISH_PASSKEY_REGISTRATION,
   GENERATION_JOBS_QUERY,
@@ -19,6 +20,7 @@ import {
   START_PASSKEY_AUTHENTICATION,
   START_PASSKEY_REGISTRATION,
   UPLOAD_SKILL,
+  UPDATE_PROVIDER_PROFILE,
   UPDATE_WORKSPACE_MEMBER_ROLE,
   WORKSPACE_MEMBERS_QUERY,
   WORKSPACES_QUERY
@@ -127,7 +129,9 @@ export function App() {
   const [providerName, setProviderName] = useState("Local OpenAI Compatible");
   const [providerBaseUrl, setProviderBaseUrl] = useState("https://api.example.test/v1");
   const [providerModel, setProviderModel] = useState("gpt-image-test");
+  const [providerImageModel, setProviderImageModel] = useState("gpt-image-test");
   const [providerApiKey, setProviderApiKey] = useState("test-key");
+  const [editingProviderId, setEditingProviderId] = useState("");
   const [memberEmail, setMemberEmail] = useState("tester2@example.test");
   const [memberRole, setMemberRole] = useState<WorkspaceRole>("member");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
@@ -147,6 +151,8 @@ export function App() {
   const [startPasskeyAuthenticationMutation] = useMutation(START_PASSKEY_AUTHENTICATION);
   const [finishPasskeyAuthenticationMutation] = useMutation(FINISH_PASSKEY_AUTHENTICATION);
   const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
+  const [updateProviderProfile, updateProviderMutation] = useMutation(UPDATE_PROVIDER_PROFILE);
+  const [deleteProviderProfile, deleteProviderMutation] = useMutation(DELETE_PROVIDER_PROFILE);
   const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
   const [runGenerationJob, generationMutation] = useMutation<RunGenerationData>(RUN_IMAGE_GENERATION_JOB);
   const [addWorkspaceMember, addMemberMutation] = useMutation(ADD_WORKSPACE_MEMBER);
@@ -183,13 +189,13 @@ export function App() {
   const jobRows = generationJobs.data?.generationJobs ?? [];
   const selectedProviderId = providerRows.some((profile) => profile.id === generationProviderId)
     ? generationProviderId
-    : providerRows[0]?.id || "";
+    : "";
   const selectedSkillId = skillRows.some((skill) => skill.id === generationSkillId)
     ? generationSkillId
-    : skillRows[0]?.id || "";
+    : "";
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
-  const providerError = providerMutation.error?.message;
+  const providerError = providerMutation.error?.message ?? updateProviderMutation.error?.message ?? deleteProviderMutation.error?.message;
   const generationError = generationMutation.error?.message;
   const memberError = addMemberMutation.error?.message ?? updateMemberMutation.error?.message ?? removeMemberMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
@@ -198,6 +204,7 @@ export function App() {
   useEffect(() => {
     setGenerationProviderId("");
     setGenerationSkillId("");
+    setEditingProviderId("");
   }, [activeWorkspace?.id]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -254,22 +261,71 @@ export function App() {
   async function handleProviderSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!activeWorkspace) return;
-    await createProviderProfile({
-      variables: {
-        input: {
-          workspaceId: activeWorkspace.id,
-          displayName: providerName,
-          providerType: "OPENAI_COMPATIBLE",
-          baseUrl: providerBaseUrl,
-          defaultModel: providerModel,
-          defaultImageModel: providerModel,
-          capabilities: ["image-generate", "tools"],
-          apiKey: providerApiKey
-        }
-      },
-      refetchQueries: [{ query: PROVIDER_PROFILES_QUERY, variables: { workspaceId: activeWorkspace.id } }]
-    });
+    const input = {
+      displayName: providerName,
+      baseUrl: providerBaseUrl,
+      defaultModel: providerModel,
+      defaultImageModel: providerImageModel || providerModel,
+      capabilities: ["image-generate", "tools"]
+    };
+    if (editingProviderId) {
+      await updateProviderProfile({
+        variables: {
+          input: {
+            id: editingProviderId,
+            ...input,
+            ...(providerApiKey ? { apiKey: providerApiKey } : {})
+          }
+        },
+        refetchQueries: [{ query: PROVIDER_PROFILES_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+      });
+    } else {
+      await createProviderProfile({
+        variables: {
+          input: {
+            workspaceId: activeWorkspace.id,
+            providerType: "OPENAI_COMPATIBLE",
+            ...input,
+            apiKey: providerApiKey
+          }
+        },
+        refetchQueries: [{ query: PROVIDER_PROFILES_QUERY, variables: { workspaceId: activeWorkspace.id } }]
+      });
+    }
     setProviderApiKey("");
+  }
+
+  function handleEditProvider(profile: ProviderProfile) {
+    setEditingProviderId(profile.id);
+    setProviderName(profile.displayName);
+    setProviderBaseUrl(profile.baseUrl);
+    setProviderModel(profile.defaultModel);
+    setProviderImageModel(profile.defaultImageModel ?? profile.defaultModel);
+    setProviderApiKey("");
+  }
+
+  function handleNewProvider() {
+    setEditingProviderId("");
+    setProviderName("Local OpenAI Compatible");
+    setProviderBaseUrl("https://api.example.test/v1");
+    setProviderModel("gpt-image-test");
+    setProviderImageModel("gpt-image-test");
+    setProviderApiKey("test-key");
+  }
+
+  async function handleDeleteProvider() {
+    if (!activeWorkspace || !editingProviderId) return;
+    await deleteProviderProfile({
+      variables: { id: editingProviderId },
+      refetchQueries: [
+        { query: PROVIDER_PROFILES_QUERY, variables: { workspaceId: activeWorkspace.id } },
+        { query: GENERATION_JOBS_QUERY, variables: { workspaceId: activeWorkspace.id } }
+      ]
+    });
+    if (generationProviderId === editingProviderId) {
+      setGenerationProviderId("");
+    }
+    handleNewProvider();
   }
 
   async function handleSkillSubmit(event: FormEvent<HTMLFormElement>) {
@@ -476,6 +532,9 @@ export function App() {
                     <span>{profile.baseUrl}</span>
                     <span>{profile.defaultImageModel ?? profile.defaultModel}</span>
                     <span>{profile.capabilities.join(", ") || "None"}</span>
+                    <Button className="secondary-button compact-button" type="button" onClick={() => handleEditProvider(profile)}>
+                      Edit
+                    </Button>
                   </div>
                 ))
               )}
@@ -494,13 +553,32 @@ export function App() {
                 <input value={providerModel} onChange={(event) => setProviderModel(event.target.value)} />
               </label>
               <label>
+                Image tool model
+                <input value={providerImageModel} onChange={(event) => setProviderImageModel(event.target.value)} />
+              </label>
+              <label>
                 API key
-                <input value={providerApiKey} onChange={(event) => setProviderApiKey(event.target.value)} type="password" />
+                <input
+                  value={providerApiKey}
+                  onChange={(event) => setProviderApiKey(event.target.value)}
+                  placeholder={editingProviderId ? "Leave blank to keep existing key" : ""}
+                  type="password"
+                />
               </label>
               {providerError ? <p className="error-text">{providerError}</p> : null}
-              <Button className="primary-button" type="submit">
-                Save Provider
-              </Button>
+              <div className="form-actions">
+                <Button className="primary-button" type="submit">
+                  {editingProviderId ? "Update Provider" : "Save Provider"}
+                </Button>
+                <Button className="secondary-button" type="button" onClick={handleNewProvider}>
+                  New Provider
+                </Button>
+                {editingProviderId ? (
+                  <Button className="secondary-button danger-button" type="button" onClick={handleDeleteProvider}>
+                    Delete Provider
+                  </Button>
+                ) : null}
+              </div>
             </form>
           </section>
 
@@ -557,6 +635,7 @@ export function App() {
                   value={selectedProviderId}
                   onChange={(event) => setGenerationProviderId(event.target.value)}
                 >
+                  <option value="">Select provider</option>
                   {providerRows.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.displayName}
@@ -567,6 +646,7 @@ export function App() {
               <label>
                 Generation skill
                 <select value={selectedSkillId} onChange={(event) => setGenerationSkillId(event.target.value)}>
+                  <option value="">Select skill</option>
                   {skillRows.map((skill) => (
                     <option key={skill.id} value={skill.id}>
                       {skill.name}

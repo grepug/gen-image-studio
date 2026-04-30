@@ -251,6 +251,7 @@ description: Scoped job skill.
     await page.getByLabel("Provider name").fill("Workspace Image Provider");
     await page.getByLabel("Base URL").fill("https://models.example.test/v1");
     await page.getByLabel("Default model").fill("gpt-image-workspace");
+    await page.getByLabel("Image tool model").fill("gpt-image-workspace");
     await page.getByLabel("API key").fill("super-secret-e2e-key");
     await page.getByRole("button", { name: "Save Provider" }).click();
 
@@ -258,6 +259,62 @@ description: Scoped job skill.
     await expect(page.getByText("https://models.example.test/v1")).toBeVisible();
     await expect(page.getByText("gpt-image-workspace")).toBeVisible();
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
+  });
+
+  test("updates and deletes a workspace provider profile", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Editable Provider",
+        baseUrl: "http://127.0.0.1:1/v1",
+        model: "old-model",
+        apiKey: "old-secret-key"
+      });
+      await uploadSkillFromUi(page, "editable-provider-skill.md", `---
+name: editable-provider-skill
+description: Skill for updated provider profile.
+---
+
+# Editable Provider Skill
+`);
+
+      const providerRow = page.locator(".table-row").filter({ hasText: "Editable Provider" });
+      await providerRow.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Provider name").fill("Updated Provider");
+      await page.getByLabel("Base URL").fill(mock.baseUrl);
+      await page.getByLabel("Default model").fill("updated-text-model");
+      await page.getByLabel("Image tool model").fill("updated-image-model");
+      await page.getByLabel("API key").fill("updated-secret-key");
+      await page.getByRole("button", { name: "Update Provider" }).click();
+
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider" })).toBeVisible();
+      await expect(page.getByText("updated-image-model")).toBeVisible();
+      await expect(page.getByText("updated-secret-key")).toHaveCount(0);
+
+      const prompt = `Use the updated provider ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
+      await page.getByLabel("Image prompt").fill(prompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(1);
+      expect(mock.requests[0]?.headers.authorization).toBe("Bearer updated-secret-key");
+      expect(mock.requests[0]?.body.model).toBe("updated-text-model");
+      expect(mock.requests[0]?.body.tools).toEqual([
+        { type: "image_generation", model: "updated-image-model", action: "generate" }
+      ]);
+
+      await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
+      await page.getByRole("button", { name: "Delete Provider" }).click();
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider" })).toHaveCount(0);
+      await expect(page.getByLabel("Generation provider")).toHaveValue("");
+    } finally {
+      await mock.close();
+    }
   });
 
   test("indexes a valid Agent Skill from an uploaded Skill file", async ({ page }) => {
