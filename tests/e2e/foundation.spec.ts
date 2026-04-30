@@ -184,6 +184,57 @@ description: First workspace skill.
     await expect(page.getByRole("button", { name: "Run Generation" })).toBeDisabled();
   });
 
+  test("does not show the last generated job after switching workspaces", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await resetBrowserState(page);
+      await login(page);
+      await createProviderProfile(page, {
+        name: "Scoped Job Provider",
+        baseUrl: mock.baseUrl,
+        model: "scoped-job-model",
+        apiKey: "mock-secret-key"
+      });
+      await uploadSkillFromUi(page, "scoped-job-skill.md", `---
+name: scoped-job-skill
+description: Scoped job skill.
+---
+
+# Scoped Job Skill
+`);
+      await page.getByLabel("Generation provider").selectOption({ label: "Scoped Job Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "scoped-job-skill" });
+      await page.getByLabel("Image prompt").fill("Workspace A generated prompt.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect(page.getByText("Job succeeded")).toBeVisible();
+      await expect(page.getByLabel("Latest generation job")).toContainText("Workspace A generated prompt.");
+
+      const workspaceName = "No Jobs Workspace";
+      await page.evaluate(async (name) => {
+        await fetch("http://localhost:4000/graphql", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            query: "mutation CreateWorkspace($name: String!) { createWorkspace(name: $name) { id } }",
+            variables: { name }
+          })
+        });
+      }, workspaceName);
+      await page.reload();
+      await page.getByLabel("Active workspace").selectOption({ label: workspaceName });
+
+      await expect(page.getByRole("heading", { name: workspaceName })).toBeVisible();
+      await expect(page.getByLabel("Latest generation job")).toHaveCount(0);
+    } finally {
+      await mock.close();
+    }
+  });
+
   test("rejects invalid password login", async ({ page }) => {
     await page.goto("/");
     await page.getByLabel("Email").fill(accounts[0].email);
@@ -435,6 +486,51 @@ description: Valid skill without provider permissions.
       await page.getByRole("button", { name: "Run Generation" }).click();
 
       await expect(page.getByText("Skill must request use-provider and write-workspace-assets permissions")).toBeVisible();
+      expect(mock.requests).toHaveLength(0);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("rejects generation for workspace viewers before provider key use", async ({ page }) => {
+    const mock = await startResponsesMock({
+      outputBytes: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+        "base64"
+      )
+    });
+    try {
+      await resetBrowserState(page);
+      await login(page, accounts[1]);
+      await signOut(page);
+      await login(page, accounts[0]);
+      await createProviderProfile(page, {
+        name: "Viewer Block Provider",
+        baseUrl: mock.baseUrl,
+        model: "viewer-block-model",
+        apiKey: "mock-secret-key"
+      });
+      await uploadSkillFromUi(page, "viewer-block-skill.md", `---
+name: viewer-block-skill
+description: Viewer block skill.
+---
+
+# Viewer Block Skill
+`);
+      await page.getByLabel("Member email").fill(accounts[1].email);
+      await page.getByLabel("New member role").selectOption("viewer");
+      await page.getByRole("button", { name: "Add Member" }).click();
+      const ownerWorkspaceId = await currentWorkspaceId(page);
+
+      await signOut(page);
+      await login(page, accounts[1]);
+      await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+      await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
+      await page.getByLabel("Image prompt").fill("Viewer should not run this.");
+      await page.getByRole("button", { name: "Run Generation" }).click();
+
+      await expect(page.getByText("User cannot run workspace jobs")).toBeVisible();
       expect(mock.requests).toHaveLength(0);
     } finally {
       await mock.close();

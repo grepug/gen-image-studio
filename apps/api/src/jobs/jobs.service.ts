@@ -47,7 +47,7 @@ export class JobsService {
       skillId: input.skillId,
       prompt: input.prompt.trim()
     });
-    await this.workspaces.assertMember(parsed.workspaceId, userId);
+    await this.workspaces.assertCanWriteJobs(parsed.workspaceId, userId);
     const provider = await this.providerProfiles.getStored(parsed.providerProfileId);
     if (!provider) {
       throw new NotFoundException("Provider profile not found");

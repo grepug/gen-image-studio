@@ -166,6 +166,7 @@ export const RUN_IMAGE_GENERATION_JOB = gql`
   mutation RunImageGenerationJob($input: RunImageGenerationJobInput!) {
     runImageGenerationJob(input: $input) {
       id
+      workspaceId
       status
       prompt
       events {

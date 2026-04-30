@@ -65,6 +65,7 @@ interface GenerationJobEvent {
 
 interface GenerationJob {
   id: string;
+  workspaceId: string;
   status: string;
   prompt: string;
   events: GenerationJobEvent[];
@@ -185,7 +186,8 @@ export function App() {
   const selectedSkillId = skillRows.some((skill) => skill.id === generationSkillId)
     ? generationSkillId
     : skillRows[0]?.id || "";
-  const latestJob = generationMutation.data?.runImageGenerationJob ?? jobRows[0];
+  const mutationJob = generationMutation.data?.runImageGenerationJob;
+  const latestJob = mutationJob?.workspaceId === activeWorkspace?.id ? mutationJob : jobRows[0];
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
   const providerError = providerMutation.error?.message;
