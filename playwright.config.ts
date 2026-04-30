@@ -28,7 +28,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm --filter @gen-image-studio/api build && pnpm --filter @gen-image-studio/api start",
+      command: "docker compose down -v && docker compose up -d --wait postgres && pnpm --filter @gen-image-studio/api db:migrate && pnpm --filter @gen-image-studio/api build && pnpm --filter @gen-image-studio/api start",
       url: "http://127.0.0.1:4000/graphql",
       reuseExistingServer: !process.env.CI,
       env: {

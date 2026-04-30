@@ -7,9 +7,13 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gen_image_studio"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
 volumes:
   postgres_data:
-

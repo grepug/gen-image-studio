@@ -1,9 +1,14 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from "@nestjs/common";
+import { Inject } from "@nestjs/common";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { DB } from "../db/db.module";
+import { providerProfiles } from "../db/schema";
+import { AppDb } from "../db/types";
 import { isoNow } from "../common/date";
 import { WorkspacesService } from "../workspaces/workspaces.service";
-import { ProviderProfile, ProviderProfileInput } from "./provider-profile.types";
+import { ProviderProfile, ProviderProfileInput, ProviderTypeGql } from "./provider-profile.types";
 
 const providerProfileInputSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -22,61 +27,65 @@ type StoredProviderProfile = ProviderProfile & {
 
 @Injectable()
 export class ProviderProfilesService {
-  private readonly profiles = new Map<string, StoredProviderProfile>();
+  constructor(
+    private readonly workspaces: WorkspacesService,
+    @Inject(DB) private readonly db: AppDb
+  ) {}
 
-  constructor(private readonly workspaces: WorkspacesService) {}
-
-  create(input: ProviderProfileInput, userId: string): ProviderProfile {
-    this.assertWorkspaceMember(input.workspaceId, userId);
+  async create(input: ProviderProfileInput, userId: string): Promise<ProviderProfile> {
+    await this.assertWorkspaceMember(input.workspaceId, userId);
     providerProfileInputSchema.parse({
       ...input,
       providerType: "openai-compatible"
     });
-    const now = isoNow();
-    const profile: StoredProviderProfile = {
-      id: randomUUID(),
-      workspaceId: input.workspaceId,
-      displayName: input.displayName,
-      providerType: input.providerType,
-      baseUrl: input.baseUrl,
-      defaultModel: input.defaultModel,
-      capabilities: input.capabilities,
-      hasApiKey: true,
-      encryptedApiKey: this.encryptForStorage(input.apiKey),
-      createdAt: now,
-      updatedAt: now,
-      ...(input.defaultImageModel ? { defaultImageModel: input.defaultImageModel } : {})
-    };
-    this.profiles.set(profile.id, profile);
-    return this.redact(profile);
+    const [profile] = await this.db
+      .insert(providerProfiles)
+      .values({
+        workspaceId: input.workspaceId,
+        ownerId: userId,
+        displayName: input.displayName,
+        providerType: "openai-compatible",
+        baseUrl: input.baseUrl,
+        defaultModel: input.defaultModel,
+        defaultImageModel: input.defaultImageModel,
+        capabilities: input.capabilities,
+        encryptedApiKey: this.encryptForStorage(input.apiKey)
+      })
+      .returning();
+    if (!profile) {
+      throw new Error("Provider profile creation failed");
+    }
+    return this.toProviderProfile(profile);
   }
 
-  list(workspaceId: string, userId: string): ProviderProfile[] {
-    this.assertWorkspaceMember(workspaceId, userId);
-    return [...this.profiles.values()]
-      .filter((profile) => profile.workspaceId === workspaceId)
-      .map((profile) => this.redact(profile));
+  async list(workspaceId: string, userId: string): Promise<ProviderProfile[]> {
+    await this.assertWorkspaceMember(workspaceId, userId);
+    const rows = await this.db
+      .select()
+      .from(providerProfiles)
+      .where(eq(providerProfiles.workspaceId, workspaceId));
+    return rows.map((row) => this.toProviderProfile(row));
   }
 
-  getStored(id: string): StoredProviderProfile | undefined {
-    return this.profiles.get(id);
+  async getStored(id: string): Promise<StoredProviderProfile | undefined> {
+    const [profile] = await this.db
+      .select()
+      .from(providerProfiles)
+      .where(eq(providerProfiles.id, id))
+      .limit(1);
+    return profile ? this.toStoredProviderProfile(profile) : undefined;
   }
 
-  getApiKey(id: string): string {
-    const profile = this.profiles.get(id);
+  async getApiKey(id: string): Promise<string> {
+    const profile = await this.getStored(id);
     if (!profile) {
       throw new BadRequestException("Provider profile not found");
     }
     return this.decryptFromStorage(profile.encryptedApiKey);
   }
 
-  private redact(profile: StoredProviderProfile): ProviderProfile {
-    const { encryptedApiKey: _encryptedApiKey, ...view } = profile;
-    return view;
-  }
-
-  private assertWorkspaceMember(workspaceId: string, userId: string): void {
-    this.workspaces.assertMember(workspaceId, userId);
+  private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+    await this.workspaces.assertMember(workspaceId, userId);
   }
 
   private encryptForStorage(value: string): string {
@@ -105,5 +114,29 @@ export class ProviderProfilesService {
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivRaw, "base64url"));
     decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
     return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, "base64url")), decipher.final()]).toString("utf8");
+  }
+
+  private toProviderProfile(row: typeof providerProfiles.$inferSelect): ProviderProfile {
+    return {
+      id: row.id,
+      workspaceId: row.workspaceId,
+      displayName: row.displayName,
+      providerType: ProviderTypeGql.OPENAI_COMPATIBLE,
+      baseUrl: row.baseUrl,
+      defaultModel: row.defaultModel,
+      capabilities: row.capabilities,
+      hasApiKey: true,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      ...(row.defaultImageModel ? { defaultImageModel: row.defaultImageModel } : {}),
+      ...(row.verifiedAt ? { verifiedAt: row.verifiedAt.toISOString() } : {})
+    };
+  }
+
+  private toStoredProviderProfile(row: typeof providerProfiles.$inferSelect): StoredProviderProfile {
+    return {
+      ...this.toProviderProfile(row),
+      encryptedApiKey: row.encryptedApiKey
+    };
   }
 }

@@ -11,7 +11,7 @@ export class ProviderProfilesResolver {
   providerProfiles(
     @Args("workspaceId", { type: () => String }) workspaceId: string,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): ProviderProfile[] {
+  ): Promise<ProviderProfile[]> {
     return this.providerProfileService.list(workspaceId, currentUserId(req));
   }
 
@@ -19,7 +19,7 @@ export class ProviderProfilesResolver {
   createProviderProfile(
     @Args("input", { type: () => ProviderProfileInput }) input: ProviderProfileInput,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): ProviderProfile {
+  ): Promise<ProviderProfile> {
     return this.providerProfileService.create(input, currentUserId(req));
   }
 }

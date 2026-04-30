@@ -8,18 +8,18 @@ export class WorkspacesResolver {
   constructor(private readonly workspaces: WorkspacesService) {}
 
   @Query(() => [Workspace])
-  workspacesForCurrentUser(@Context("req") req: { headers: Record<string, string | undefined> }): Workspace[] {
+  async workspacesForCurrentUser(@Context("req") req: { headers: Record<string, string | undefined> }): Promise<Workspace[]> {
     const userId = currentUserId(req);
-    this.workspaces.ensureWorkspaceForUser(userId);
+    await this.workspaces.ensureWorkspaceForUser(userId);
     return this.workspaces.listForUser(userId);
   }
 
   @Query(() => [WorkspaceMembership])
-  workspaceMembers(
+  async workspaceMembers(
     @Args("workspaceId", { type: () => String }) workspaceId: string,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): WorkspaceMembership[] {
-    this.workspaces.assertMember(workspaceId, currentUserId(req));
+  ): Promise<WorkspaceMembership[]> {
+    await this.workspaces.assertMember(workspaceId, currentUserId(req));
     return this.workspaces.listMemberships(workspaceId);
   }
 
@@ -27,7 +27,7 @@ export class WorkspacesResolver {
   createWorkspace(
     @Args("name", { type: () => String }) name: string,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): Workspace {
+  ): Promise<Workspace> {
     return this.workspaces.createWorkspace({ name, ownerId: currentUserId(req) });
   }
 }

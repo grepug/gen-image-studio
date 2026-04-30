@@ -11,7 +11,7 @@ export class SkillsResolver {
   skills(
     @Args("workspaceId", { type: () => String }) workspaceId: string,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): Skill[] {
+  ): Promise<Skill[]> {
     return this.skillService.list(workspaceId, currentUserId(req));
   }
 
@@ -19,7 +19,7 @@ export class SkillsResolver {
   uploadSkill(
     @Args("input", { type: () => SkillUploadInput }) input: SkillUploadInput,
     @Context("req") req: { headers: Record<string, string | undefined> }
-  ): SkillUploadResult {
+  ): Promise<SkillUploadResult> {
     return this.skillService.upload(input, currentUserId(req));
   }
 }
