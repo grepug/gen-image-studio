@@ -28,7 +28,7 @@ const providerProfileUpdateSchema = z.object({
   defaultModel: z.string().min(1).max(120),
   defaultImageModel: z.string().min(1).max(120).optional(),
   capabilities: z.array(z.string()),
-  apiKey: z.string().min(1).optional()
+  apiKey: z.string().min(1).nullish()
 });
 
 type StoredProviderProfile = ProviderProfile & {

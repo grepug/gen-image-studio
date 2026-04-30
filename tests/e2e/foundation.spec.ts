@@ -309,8 +309,28 @@ description: Skill for updated provider profile.
       ]);
 
       await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Provider name").fill("Updated Provider No Key Rotation");
+      await page.getByLabel("Default model").fill("second-text-model");
+      await page.getByLabel("Image tool model").fill("second-image-model");
+      await page.getByLabel("API key").fill("");
+      await page.getByRole("button", { name: "Update Provider" }).click();
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toBeVisible();
+
+      const secondPrompt = `Keep the existing provider key ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider No Key Rotation" });
+      await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
+      await page.getByLabel("Image prompt").fill(secondPrompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(2);
+      expect(mock.requests[1]?.headers.authorization).toBe("Bearer updated-secret-key");
+      expect(mock.requests[1]?.body.model).toBe("second-text-model");
+      expect(mock.requests[1]?.body.tools).toEqual([
+        { type: "image_generation", model: "second-image-model", action: "generate" }
+      ]);
+
+      await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
       await page.getByRole("button", { name: "Delete Provider" }).click();
-      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider" })).toHaveCount(0);
+      await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toHaveCount(0);
       await expect(page.getByLabel("Generation provider")).toHaveValue("");
     } finally {
       await mock.close();
