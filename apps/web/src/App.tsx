@@ -173,7 +173,8 @@ export function App() {
   });
   const generationJobs = useQuery<GenerationJobsData>(GENERATION_JOBS_QUERY, {
     variables: { workspaceId: activeWorkspace?.id ?? "" },
-    skip: !activeWorkspace
+    skip: !activeWorkspace,
+    pollInterval: 3000
   });
 
   const providerRows = providers.data?.providerProfiles ?? [];
@@ -186,8 +187,6 @@ export function App() {
   const selectedSkillId = skillRows.some((skill) => skill.id === generationSkillId)
     ? generationSkillId
     : skillRows[0]?.id || "";
-  const mutationJob = generationMutation.data?.runImageGenerationJob;
-  const latestJob = mutationJob?.workspaceId === activeWorkspace?.id ? mutationJob : jobRows[0];
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
   const providerError = providerMutation.error?.message;
@@ -584,24 +583,27 @@ export function App() {
                 {generationMutation.loading ? "Running" : "Run Generation"}
               </Button>
             </form>
-            {latestJob ? (
-              <div className="job-result" aria-label="Latest generation job">
-                <strong>Job {latestJob.status}</strong>
-                <span>{latestJob.prompt}</span>
-                {latestJob.outputs.map((output) => (
-                  <span key={output.id}>
-                    {output.label} - {output.mimeType} - {output.byteSize} bytes
-                  </span>
-                ))}
-                {latestJob.events
-                  .filter((event) => event.type === "failed" && event.message)
-                  .map((event) => (
-                    <span className="error-text" key={event.id}>
-                      {event.message}
-                    </span>
-                  ))}
-              </div>
-            ) : null}
+            <div className="job-history" aria-label="Generation history">
+              {jobRows.length === 0 ? (
+                <div className="empty-block">No generation jobs in this workspace.</div>
+              ) : (
+                jobRows.map((job) => {
+                  const latestEvent = job.events.at(-1);
+                  return (
+                    <article className="job-result" key={job.id}>
+                      <strong>Job {job.status}</strong>
+                      <span>{job.prompt}</span>
+                      {latestEvent?.message ? <span>{latestEvent.message}</span> : null}
+                      {job.outputs.map((output) => (
+                        <span key={output.id}>
+                          {output.label} - {output.mimeType} - {output.byteSize} bytes
+                        </span>
+                      ))}
+                    </article>
+                  );
+                })
+              )}
+            </div>
           </section>
 
           <section className="panel">

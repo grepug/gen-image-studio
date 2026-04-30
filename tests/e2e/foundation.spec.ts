@@ -211,7 +211,7 @@ description: Scoped job skill.
       await page.getByLabel("Image prompt").fill("Workspace A generated prompt.");
       await page.getByRole("button", { name: "Run Generation" }).click();
       await expect(page.getByText("Job succeeded")).toBeVisible();
-      await expect(page.getByLabel("Latest generation job")).toContainText("Workspace A generated prompt.");
+      await expect(page.getByLabel("Generation history")).toContainText("Workspace A generated prompt.");
 
       const workspaceName = "No Jobs Workspace";
       await page.evaluate(async (name) => {
@@ -229,7 +229,7 @@ description: Scoped job skill.
       await page.getByLabel("Active workspace").selectOption({ label: workspaceName });
 
       await expect(page.getByRole("heading", { name: workspaceName })).toBeVisible();
-      await expect(page.getByLabel("Latest generation job")).toHaveCount(0);
+      await expect(page.getByLabel("Generation history")).not.toContainText("Workspace A generated prompt.");
     } finally {
       await mock.close();
     }
@@ -394,9 +394,9 @@ Always produce a sharp product image.
       await page.getByRole("button", { name: "Run Generation" }).click();
 
       await expect.poll(() => mock.requests.length).toBe(1);
-      await expect(page.getByLabel("Latest generation job")).toContainText("Job succeeded");
-      await expect(page.getByLabel("Latest generation job")).toContainText(prompt);
-      await expect(page.getByLabel("Latest generation job")).toContainText("generated-image - image/png");
+      await expect(page.getByLabel("Generation history")).toContainText("Job succeeded");
+      await expect(page.getByLabel("Generation history")).toContainText(prompt);
+      await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
       expect(mock.requests[0]?.headers.authorization).toBe("Bearer mock-secret-key");
       expect(mock.requests[0]?.body.model).toBe("gpt-mock-responses");
       expect(mock.requests[0]?.body.stream).toBe(true);
@@ -519,6 +519,13 @@ description: Viewer block skill.
 
 # Viewer Block Skill
 `);
+      const historyPrompt = `Viewer readable history prompt ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
+      await page.getByLabel("Image prompt").fill(historyPrompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(1);
+      await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
       await page.getByLabel("Member email").fill(accounts[1].email);
       await page.getByLabel("New member role").selectOption("viewer");
       await page.getByRole("button", { name: "Add Member" }).click();
@@ -527,13 +534,64 @@ description: Viewer block skill.
       await signOut(page);
       await login(page, accounts[1]);
       await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+      await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
+      await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
       await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
       await page.getByLabel("Image prompt").fill("Viewer should not run this.");
       await page.getByRole("button", { name: "Run Generation" }).click();
 
       await expect(page.getByText("User cannot run workspace jobs")).toBeVisible();
-      expect(mock.requests).toHaveLength(0);
+      expect(mock.requests).toHaveLength(1);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test("shows generated job history to another workspace collaborator", async ({ page }) => {
+    const outputBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const mock = await startResponsesMock({ outputBytes });
+    try {
+      await resetBrowserState(page);
+      await login(page, accounts[2]);
+      await signOut(page);
+      await login(page, accounts[0]);
+      await createProviderProfile(page, {
+        name: "Shared History Provider",
+        baseUrl: mock.baseUrl,
+        model: "shared-history-model",
+        apiKey: "mock-secret-key"
+      });
+      await uploadSkillFromUi(page, "shared-history-skill.md", `---
+name: shared-history-skill
+description: Shared history skill.
+---
+
+# Shared History Skill
+`);
+      await page.getByLabel("Member email").fill(accounts[2].email);
+      await page.getByLabel("New member role").selectOption("member");
+      await page.getByRole("button", { name: "Add Member" }).click();
+      const ownerWorkspaceId = await currentWorkspaceId(page);
+      const prompt = `Collaborative history prompt ${Date.now()}.`;
+
+      await page.getByLabel("Generation provider").selectOption({ label: "Shared History Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "shared-history-skill" });
+      await page.getByLabel("Image prompt").fill(prompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(1);
+      await expect(page.getByLabel("Generation history")).toContainText(prompt);
+
+      await signOut(page);
+      await login(page, accounts[2]);
+      await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+
+      await expect(page.getByLabel("Generation history")).toContainText(prompt);
+      await expect(page.getByLabel("Generation history")).toContainText("Job succeeded");
+      await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
     } finally {
       await mock.close();
     }
