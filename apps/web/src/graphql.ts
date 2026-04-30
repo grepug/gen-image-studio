@@ -1,11 +1,16 @@
 import { gql } from "@apollo/client";
 
-export const DASHBOARD_QUERY = gql`
-  query Dashboard {
+export const CURRENT_USER_QUERY = gql`
+  query CurrentUser {
     currentUser {
       id
       displayName
     }
+  }
+`;
+
+export const WORKSPACES_QUERY = gql`
+  query Workspaces {
     workspacesForCurrentUser {
       id
       name
@@ -15,9 +20,53 @@ export const DASHBOARD_QUERY = gql`
   }
 `;
 
+export const LOGOUT = gql`
+  mutation Logout {
+    logout
+  }
+`;
+
 export const LOGIN_WITH_PASSWORD = gql`
   mutation LoginWithPassword($email: String!, $password: String!) {
     loginWithPassword(email: $email, password: $password) {
+      userId
+      displayName
+      email
+    }
+  }
+`;
+
+export const START_PASSKEY_REGISTRATION = gql`
+  mutation StartPasskeyRegistration {
+    startPasskeyRegistration {
+      challengeId
+      optionsJson
+    }
+  }
+`;
+
+export const FINISH_PASSKEY_REGISTRATION = gql`
+  mutation FinishPasskeyRegistration($challengeId: String!, $responseJson: String!) {
+    finishPasskeyRegistration(challengeId: $challengeId, responseJson: $responseJson) {
+      userId
+      displayName
+      email
+    }
+  }
+`;
+
+export const START_PASSKEY_AUTHENTICATION = gql`
+  mutation StartPasskeyAuthentication {
+    startPasskeyAuthentication {
+      challengeId
+      optionsJson
+    }
+  }
+`;
+
+export const FINISH_PASSKEY_AUTHENTICATION = gql`
+  mutation FinishPasskeyAuthentication($challengeId: String!, $responseJson: String!) {
+    finishPasskeyAuthentication(challengeId: $challengeId, responseJson: $responseJson) {
       userId
       displayName
       email

@@ -1,7 +1,22 @@
-import { Injectable } from "@nestjs/common";
-import { randomBytes, randomUUID } from "node:crypto";
-import { isoNow } from "../common/date";
-import { CurrentUser, LoginResult, PasskeyChallenge } from "./auth.types";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import { Inject } from "@nestjs/common";
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse
+} from "@simplewebauthn/server";
+import type {
+  AuthenticationResponseJSON,
+  AuthenticatorTransportFuture,
+  RegistrationResponseJSON,
+  WebAuthnCredential
+} from "@simplewebauthn/server";
+import { and, eq, isNull } from "drizzle-orm";
+import { DB } from "../db/db.module";
+import { passkeyCredentials, users, webauthnChallenges } from "../db/schema";
+import { AppDb } from "../db/types";
+import { CurrentUser, LoginResult, PasskeyOptions } from "./auth.types";
 
 interface TestAccount {
   id: string;
@@ -12,39 +27,152 @@ interface TestAccount {
 
 @Injectable()
 export class AuthService {
-  private readonly challenges = new Map<string, PasskeyChallenge>();
   private readonly testAccounts: TestAccount[];
 
-  constructor() {
+  constructor(@Inject(DB) private readonly db: AppDb) {
     this.testAccounts = this.loadTestAccounts();
   }
 
-  currentUser(userId?: string): CurrentUser {
-    const account = this.testAccounts.find((candidate) => candidate.id === userId) ?? this.testAccounts[0];
+  async currentUser(userId?: string): Promise<CurrentUser | null> {
+    if (!userId) {
+      return null;
+    }
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) {
+      return null;
+    }
     return {
-      id: account?.id ?? "00000000-0000-4000-8000-000000000001",
-      displayName: account?.displayName ?? "Local Developer"
+      id: user.id,
+      displayName: user.displayName
     };
   }
 
-  startPasskeyRegistration(): PasskeyChallenge {
-    return this.createChallenge();
-  }
-
-  startPasskeyAuthentication(): PasskeyChallenge {
-    return this.createChallenge();
-  }
-
-  finishPasskeyCeremony(challengeId: string): boolean {
-    const challenge = this.challenges.get(challengeId);
-    if (!challenge) {
-      return false;
+  async startPasskeyRegistration(userId: string): Promise<PasskeyOptions> {
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) {
+      throw new BadRequestException("Authenticated user not found");
     }
-    this.challenges.delete(challengeId);
-    return true;
+    const credentials = await this.db
+      .select()
+      .from(passkeyCredentials)
+      .where(eq(passkeyCredentials.userId, userId));
+    const options = await generateRegistrationOptions({
+      rpName: process.env.PASSKEY_RP_NAME ?? "Gen Image Studio",
+      rpID: this.rpId(),
+      userName: user.email ?? user.id,
+      userID: Buffer.from(user.id),
+      userDisplayName: user.displayName,
+      attestationType: "none",
+      excludeCredentials: credentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as AuthenticatorTransportFuture[]
+      })),
+      authenticatorSelection: {
+        residentKey: "preferred",
+        userVerification: "preferred"
+      }
+    });
+    const [challenge] = await this.db
+      .insert(webauthnChallenges)
+      .values({
+        userId,
+        challenge: options.challenge,
+        purpose: "registration",
+        expiresAt: this.challengeExpiry()
+      })
+      .returning();
+    if (!challenge) {
+      throw new Error("Passkey registration challenge creation failed");
+    }
+    return { challengeId: challenge.id, optionsJson: JSON.stringify(options) };
   }
 
-  loginWithPassword(email: string, password: string): LoginResult | null {
+  async finishPasskeyRegistration(challengeId: string, responseJson: string): Promise<LoginResult> {
+    const challenge = await this.consumeChallenge(challengeId, "registration");
+    if (!challenge.userId) {
+      throw new BadRequestException("Registration challenge is not bound to a user");
+    }
+    const response = JSON.parse(responseJson) as RegistrationResponseJSON;
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: this.origin(),
+      expectedRPID: this.rpId(),
+      requireUserVerification: false
+    });
+    if (!verification.verified) {
+      throw new BadRequestException("Passkey registration verification failed");
+    }
+    const { credential, credentialBackedUp } = verification.registrationInfo;
+    await this.db
+      .insert(passkeyCredentials)
+      .values({
+        userId: challenge.userId,
+        credentialId: credential.id,
+        publicKey: Buffer.from(credential.publicKey).toString("base64url"),
+        counter: credential.counter,
+        transports: response.response.transports ?? [],
+        backedUp: credentialBackedUp
+      })
+      .onConflictDoNothing();
+    return this.loginResultForUser(challenge.userId);
+  }
+
+  async startPasskeyAuthentication(): Promise<PasskeyOptions> {
+    const options = await generateAuthenticationOptions({
+      rpID: this.rpId(),
+      userVerification: "preferred"
+    });
+    const [challenge] = await this.db
+      .insert(webauthnChallenges)
+      .values({
+        challenge: options.challenge,
+        purpose: "authentication",
+        expiresAt: this.challengeExpiry()
+      })
+      .returning();
+    if (!challenge) {
+      throw new Error("Passkey authentication challenge creation failed");
+    }
+    return { challengeId: challenge.id, optionsJson: JSON.stringify(options) };
+  }
+
+  async finishPasskeyAuthentication(challengeId: string, responseJson: string): Promise<LoginResult> {
+    const challenge = await this.consumeChallenge(challengeId, "authentication");
+    const response = JSON.parse(responseJson) as AuthenticationResponseJSON;
+    const [storedCredential] = await this.db
+      .select()
+      .from(passkeyCredentials)
+      .where(eq(passkeyCredentials.credentialId, response.id))
+      .limit(1);
+    if (!storedCredential) {
+      throw new BadRequestException("Passkey credential not found");
+    }
+    const credential: WebAuthnCredential = {
+      id: storedCredential.credentialId,
+      publicKey: Buffer.from(storedCredential.publicKey, "base64url"),
+      counter: storedCredential.counter,
+      transports: storedCredential.transports as AuthenticatorTransportFuture[]
+    };
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: challenge.challenge,
+      expectedOrigin: this.origin(),
+      expectedRPID: this.rpId(),
+      credential,
+      requireUserVerification: false
+    });
+    if (!verification.verified) {
+      throw new BadRequestException("Passkey authentication verification failed");
+    }
+    await this.db
+      .update(passkeyCredentials)
+      .set({ counter: verification.authenticationInfo.newCounter, updatedAt: new Date() })
+      .where(eq(passkeyCredentials.id, storedCredential.id));
+    return this.loginResultForUser(storedCredential.userId);
+  }
+
+  async loginWithPassword(email: string, password: string): Promise<LoginResult | null> {
     if (process.env.ENABLE_E2E_PASSWORD_LOGIN !== "true") {
       return null;
     }
@@ -52,6 +180,7 @@ export class AuthService {
     if (!account) {
       return null;
     }
+    await this.ensureUser(account);
     return {
       userId: account.id,
       displayName: account.displayName,
@@ -59,16 +188,60 @@ export class AuthService {
     };
   }
 
-  private createChallenge(): PasskeyChallenge {
-    const challenge: PasskeyChallenge = {
-      challengeId: randomUUID(),
-      challenge: randomBytes(32).toString("base64url"),
-      rpId: process.env.PASSKEY_RP_ID ?? "localhost",
-      origin: process.env.PASSKEY_ORIGIN ?? "http://localhost:5173",
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+  private async consumeChallenge(challengeId: string, purpose: "authentication" | "registration") {
+    const [challenge] = await this.db
+      .select()
+      .from(webauthnChallenges)
+      .where(
+        and(
+          eq(webauthnChallenges.id, challengeId),
+          eq(webauthnChallenges.purpose, purpose),
+          isNull(webauthnChallenges.consumedAt)
+        )
+      )
+      .limit(1);
+    if (!challenge || challenge.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException("Passkey challenge is missing or expired");
+    }
+    await this.db
+      .update(webauthnChallenges)
+      .set({ consumedAt: new Date() })
+      .where(eq(webauthnChallenges.id, challenge.id));
+    return challenge;
+  }
+
+  private async loginResultForUser(userId: string): Promise<LoginResult> {
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) {
+      throw new BadRequestException("User not found");
+    }
+    return {
+      userId: user.id,
+      displayName: user.displayName,
+      email: user.email ?? ""
     };
-    this.challenges.set(challenge.challengeId, challenge);
-    return { ...challenge, expiresAt: challenge.expiresAt || isoNow() };
+  }
+
+  private async ensureUser(account: TestAccount): Promise<void> {
+    await this.db
+      .insert(users)
+      .values({ id: account.id, displayName: account.displayName, email: account.email })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { displayName: account.displayName, email: account.email, updatedAt: new Date() }
+      });
+  }
+
+  private challengeExpiry(): Date {
+    return new Date(Date.now() + 5 * 60 * 1000);
+  }
+
+  private rpId(): string {
+    return process.env.PASSKEY_RP_ID ?? "localhost";
+  }
+
+  private origin(): string {
+    return process.env.PASSKEY_ORIGIN ?? "http://localhost:5173";
   }
 
   private loadTestAccounts(): TestAccount[] {

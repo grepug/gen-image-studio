@@ -22,19 +22,10 @@ export class LoginResult {
 }
 
 @ObjectType()
-export class PasskeyChallenge {
+export class PasskeyOptions {
   @Field()
   challengeId: string;
 
   @Field()
-  challenge: string;
-
-  @Field()
-  rpId: string;
-
-  @Field()
-  origin: string;
-
-  @Field()
-  expiresAt: string;
+  optionsJson: string;
 }

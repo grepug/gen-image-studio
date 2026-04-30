@@ -1,4 +1,5 @@
 import { Args, Context, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { RequestWithHeaders } from "../auth/session";
 import { currentUserId } from "../workspaces/workspaces.resolver";
 import { ProviderProfile, ProviderProfileInput } from "./provider-profile.types";
 import { ProviderProfilesService } from "./provider-profiles.service";
@@ -10,7 +11,7 @@ export class ProviderProfilesResolver {
   @Query(() => [ProviderProfile])
   providerProfiles(
     @Args("workspaceId", { type: () => String }) workspaceId: string,
-    @Context("req") req: { headers: Record<string, string | undefined> }
+    @Context("req") req: RequestWithHeaders
   ): Promise<ProviderProfile[]> {
     return this.providerProfileService.list(workspaceId, currentUserId(req));
   }
@@ -18,7 +19,7 @@ export class ProviderProfilesResolver {
   @Mutation(() => ProviderProfile)
   createProviderProfile(
     @Args("input", { type: () => ProviderProfileInput }) input: ProviderProfileInput,
-    @Context("req") req: { headers: Record<string, string | undefined> }
+    @Context("req") req: RequestWithHeaders
   ): Promise<ProviderProfile> {
     return this.providerProfileService.create(input, currentUserId(req));
   }

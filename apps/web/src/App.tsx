@@ -1,14 +1,21 @@
 import { useMutation, useQuery } from "@apollo/client";
 import { Button } from "@base-ui/react/button";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import {
+  CURRENT_USER_QUERY,
   CREATE_PROVIDER_PROFILE,
-  DASHBOARD_QUERY,
+  FINISH_PASSKEY_AUTHENTICATION,
+  FINISH_PASSKEY_REGISTRATION,
   LOGIN_WITH_PASSWORD,
+  LOGOUT,
   PROVIDER_PROFILES_QUERY,
   SKILLS_QUERY,
-  UPLOAD_SKILL
+  START_PASSKEY_AUTHENTICATION,
+  START_PASSKEY_REGISTRATION,
+  UPLOAD_SKILL,
+  WORKSPACES_QUERY
 } from "./graphql";
 
 interface Workspace {
@@ -38,7 +45,10 @@ interface DashboardData {
   currentUser: {
     id: string;
     displayName: string;
-  };
+  } | null;
+}
+
+interface WorkspacesData {
   workspacesForCurrentUser: Workspace[];
 }
 
@@ -57,10 +67,6 @@ interface LoggedInUser {
 }
 
 export function App() {
-  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(() => {
-    const raw = localStorage.getItem("gen-image-studio:user");
-    return raw ? (JSON.parse(raw) as LoggedInUser) : null;
-  });
   const [email, setEmail] = useState("tester1@example.test");
   const [password, setPassword] = useState("test-password-1");
   const [providerName, setProviderName] = useState("Local OpenAI Compatible");
@@ -76,13 +82,23 @@ version: 0.1.0
 # Studio Image Style
 `);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
+  const currentUserQuery = useQuery<DashboardData>(CURRENT_USER_QUERY, {
+    fetchPolicy: "cache-and-network"
+  });
   const [loginWithPassword, loginState] = useMutation(LOGIN_WITH_PASSWORD);
+  const [logoutMutation] = useMutation(LOGOUT);
+  const [startPasskeyRegistrationMutation] = useMutation(START_PASSKEY_REGISTRATION);
+  const [finishPasskeyRegistrationMutation] = useMutation(FINISH_PASSKEY_REGISTRATION);
+  const [startPasskeyAuthenticationMutation] = useMutation(START_PASSKEY_AUTHENTICATION);
+  const [finishPasskeyAuthenticationMutation] = useMutation(FINISH_PASSKEY_AUTHENTICATION);
   const [createProviderProfile, providerMutation] = useMutation(CREATE_PROVIDER_PROFILE);
   const [uploadSkill, skillMutation] = useMutation(UPLOAD_SKILL);
-  const dashboard = useQuery<DashboardData>(DASHBOARD_QUERY, {
-    skip: !loggedInUser
+  const currentUser = currentUserQuery.data?.currentUser;
+  const workspaces = useQuery<WorkspacesData>(WORKSPACES_QUERY, {
+    skip: !currentUser
   });
-  const activeWorkspace = dashboard.data?.workspacesForCurrentUser[0];
+  const activeWorkspace = workspaces.data?.workspacesForCurrentUser[0];
   const providers = useQuery<ProviderProfilesData>(PROVIDER_PROFILES_QUERY, {
     variables: { workspaceId: activeWorkspace?.id ?? "" },
     skip: !activeWorkspace
@@ -94,7 +110,7 @@ version: 0.1.0
 
   const providerRows = providers.data?.providerProfiles ?? [];
   const skillRows = skills.data?.skills ?? [];
-  const currentUserName = loggedInUser?.displayName ?? dashboard.data?.currentUser.displayName ?? "Loading user";
+  const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
   const providerError = providerMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
@@ -106,11 +122,48 @@ version: 0.1.0
     const result = await loginWithPassword({ variables: { email, password } });
     const user = result.data?.loginWithPassword as LoggedInUser | undefined;
     if (user) {
-      localStorage.setItem("gen-image-studio:user", JSON.stringify(user));
-      setLoggedInUser(user);
+      await currentUserQuery.refetch();
       return;
     }
     setLoginMessage("Invalid test login credentials");
+  }
+
+  async function handlePasskeySignIn() {
+    setLoginMessage(null);
+    try {
+      const started = await startPasskeyAuthenticationMutation();
+      const payload = started.data?.startPasskeyAuthentication as { challengeId: string; optionsJson: string } | undefined;
+      if (!payload) return;
+      const response = await startAuthentication({ optionsJSON: JSON.parse(payload.optionsJson) });
+      await finishPasskeyAuthenticationMutation({
+        variables: { challengeId: payload.challengeId, responseJson: JSON.stringify(response) }
+      });
+      await currentUserQuery.refetch();
+    } catch (error) {
+      setLoginMessage(error instanceof Error ? error.message : "Passkey sign-in failed");
+    }
+  }
+
+  async function handleRegisterPasskey() {
+    setPasskeyMessage(null);
+    try {
+      const started = await startPasskeyRegistrationMutation();
+      const payload = started.data?.startPasskeyRegistration as { challengeId: string; optionsJson: string } | undefined;
+      if (!payload) return;
+      const response = await startRegistration({ optionsJSON: JSON.parse(payload.optionsJson) });
+      await finishPasskeyRegistrationMutation({
+        variables: { challengeId: payload.challengeId, responseJson: JSON.stringify(response) }
+      });
+      setPasskeyMessage("Passkey registered");
+      await currentUserQuery.refetch();
+    } catch (error) {
+      setPasskeyMessage(error instanceof Error ? error.message : "Passkey registration failed");
+    }
+  }
+
+  async function handleLogout() {
+    await logoutMutation();
+    await currentUserQuery.refetch();
   }
 
   async function handleProviderSubmit(event: FormEvent<HTMLFormElement>) {
@@ -150,7 +203,7 @@ version: 0.1.0
     });
   }
 
-  if (!loggedInUser) {
+  if (!currentUser) {
     return (
       <main className="login-page">
         <form className="login-panel" onSubmit={handleLogin}>
@@ -179,6 +232,10 @@ version: 0.1.0
           <Button className="primary-button" type="submit">
             <KeyRound size={18} />
             Sign in
+          </Button>
+          <Button className="secondary-button" type="button" onClick={handlePasskeySignIn}>
+            <KeyRound size={18} />
+            Sign in with passkey
           </Button>
         </form>
       </main>
@@ -227,15 +284,15 @@ version: 0.1.0
             <h1>{activeWorkspace?.name ?? "Workspace setup"}</h1>
           </div>
           <div className="topbar-actions">
-            <Button className="secondary-button">
-              <UsersRound size={18} />
-              Invite
+            <Button className="secondary-button" onClick={handleRegisterPasskey}>
+              <KeyRound size={18} />
+              Register Passkey
             </Button>
-            <Button className="primary-button">
-              <Upload size={18} />
-              Upload Skill
+            <Button className="secondary-button" onClick={handleLogout}>
+              Sign out
             </Button>
           </div>
+          {passkeyMessage ? <p className="success-text topbar-message">{passkeyMessage}</p> : null}
         </header>
 
         <div className="content-grid">
