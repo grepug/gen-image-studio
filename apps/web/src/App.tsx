@@ -2,7 +2,7 @@ import { useApolloClient, useMutation, useQuery } from "@apollo/client";
 import { Button } from "@base-ui/react/button";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ADD_WORKSPACE_MEMBER,
   CURRENT_USER_QUERY,
@@ -179,8 +179,12 @@ export function App() {
   const skillRows = skills.data?.skills ?? [];
   const memberRows = members.data?.workspaceMembers ?? [];
   const jobRows = generationJobs.data?.generationJobs ?? [];
-  const selectedProviderId = generationProviderId || providerRows[0]?.id || "";
-  const selectedSkillId = generationSkillId || skillRows[0]?.id || "";
+  const selectedProviderId = providerRows.some((profile) => profile.id === generationProviderId)
+    ? generationProviderId
+    : providerRows[0]?.id || "";
+  const selectedSkillId = skillRows.some((skill) => skill.id === generationSkillId)
+    ? generationSkillId
+    : skillRows[0]?.id || "";
   const latestJob = generationMutation.data?.runImageGenerationJob ?? jobRows[0];
   const currentUserName = currentUser?.displayName ?? "Loading user";
   const loginError = loginState.error?.message;
@@ -189,6 +193,11 @@ export function App() {
   const memberError = addMemberMutation.error?.message ?? updateMemberMutation.error?.message ?? removeMemberMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
   const skillErrors = useMemo(() => skillResult?.version.validationErrors ?? [], [skillResult]);
+
+  useEffect(() => {
+    setGenerationProviderId("");
+    setGenerationSkillId("");
+  }, [activeWorkspace?.id]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

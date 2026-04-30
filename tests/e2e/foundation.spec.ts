@@ -144,6 +144,46 @@ test.describe("foundation workspace flows", () => {
     await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toHaveCount(0);
   });
 
+  test("keeps generation selections scoped to the active workspace", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page);
+    const firstProviderId = await createProviderProfile(page, {
+      name: "First Workspace Provider",
+      baseUrl: "http://127.0.0.1:1/v1",
+      model: "first-workspace-model",
+      apiKey: "mock-secret-key"
+    });
+    await uploadSkillFromUi(page, "first-workspace-skill.md", `---
+name: first-workspace-skill
+description: First workspace skill.
+---
+
+# First Workspace Skill
+`);
+    await page.getByLabel("Generation provider").selectOption({ label: "First Workspace Provider" });
+    await page.getByLabel("Generation skill").selectOption({ label: "first-workspace-skill" });
+
+    const workspaceName = "Second Workspace";
+    await page.evaluate(async (name) => {
+      await fetch("http://localhost:4000/graphql", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: "mutation CreateWorkspace($name: String!) { createWorkspace(name: $name) { id } }",
+          variables: { name }
+        })
+      });
+    }, workspaceName);
+    await page.reload();
+    await page.getByLabel("Active workspace").selectOption({ label: workspaceName });
+    await expect(page.getByRole("heading", { name: workspaceName })).toBeVisible();
+    await expect(page.getByLabel("Generation provider")).not.toHaveValue(firstProviderId);
+    await expect(page.getByLabel("Generation provider")).toHaveValue("");
+    await expect(page.getByLabel("Generation skill")).toHaveValue("");
+    await expect(page.getByRole("button", { name: "Run Generation" })).toBeDisabled();
+  });
+
   test("rejects invalid password login", async ({ page }) => {
     await page.goto("/");
     await page.getByLabel("Email").fill(accounts[0].email);
@@ -536,17 +576,10 @@ async function uploadSkillViaGraphql(
 async function createProviderProfile(
   page: Page,
   input: { name: string; baseUrl: string; model: string; apiKey: string; capabilities?: string[] }
-): Promise<void> {
-  await page.evaluate(async (providerInput) => {
-    const workspaceResponse = await fetch("http://localhost:4000/graphql", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "{ workspacesForCurrentUser { id } }" })
-    });
-    const workspaceJson = await workspaceResponse.json();
-    const workspaceId = workspaceJson.data.workspacesForCurrentUser[0].id as string;
-    await fetch("http://localhost:4000/graphql", {
+): Promise<string> {
+  const workspaceId = await activeWorkspaceId(page);
+  const providerId = await page.evaluate(async ({ providerInput, workspaceId }) => {
+    const response = await fetch("http://localhost:4000/graphql", {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -568,9 +601,41 @@ async function createProviderProfile(
         }
       })
     });
-  }, input);
+    const json = await response.json();
+    if (json.errors?.length) {
+      throw new Error(json.errors[0].message);
+    }
+    return json.data.createProviderProfile.id as string;
+  }, { providerInput: input, workspaceId });
   await page.reload();
-  await expect(page.locator(".table-row").filter({ hasText: input.name })).toBeVisible();
+  if ((await page.getByLabel("Active workspace").count()) > 0) {
+    await page.getByLabel("Active workspace").selectOption(workspaceId);
+  }
+  return providerId;
+}
+
+async function activeWorkspaceId(page: Page): Promise<string> {
+  if ((await page.getByLabel("Active workspace").count()) > 0) {
+    return page.getByLabel("Active workspace").inputValue();
+  }
+  return currentWorkspaceId(page);
+}
+
+async function uploadSkillFromUi(page: Page, fileName: string, content: string): Promise<void> {
+  const filePath = await writeSkillFile(fileName, content);
+  const skillName = content.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+  await page.getByRole("button", { name: "Upload Skill" }).click();
+  if (skillName) {
+    await expect(page.getByText(`Indexed ${skillName}`)).toBeVisible();
+  }
+}
+
+async function selectValueForLabel(page: Page, label: string, optionLabel: string): Promise<string> {
+  return page.getByLabel(label).evaluate((select, text) => {
+    const option = [...(select as HTMLSelectElement).options].find((item) => item.textContent === text);
+    return option?.value ?? "";
+  }, optionLabel);
 }
 
 async function startResponsesMock(options: { outputBytes?: Buffer; status?: number; body?: string }): Promise<{
