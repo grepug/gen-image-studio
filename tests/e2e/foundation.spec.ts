@@ -519,6 +519,13 @@ description: Viewer block skill.
 
 # Viewer Block Skill
 `);
+      const historyPrompt = `Viewer readable history prompt ${Date.now()}.`;
+      await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
+      await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
+      await page.getByLabel("Image prompt").fill(historyPrompt);
+      await page.getByRole("button", { name: "Run Generation" }).click();
+      await expect.poll(() => mock.requests.length).toBe(1);
+      await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
       await page.getByLabel("Member email").fill(accounts[1].email);
       await page.getByLabel("New member role").selectOption("viewer");
       await page.getByRole("button", { name: "Add Member" }).click();
@@ -527,13 +534,15 @@ description: Viewer block skill.
       await signOut(page);
       await login(page, accounts[1]);
       await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+      await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
+      await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
       await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
       await page.getByLabel("Image prompt").fill("Viewer should not run this.");
       await page.getByRole("button", { name: "Run Generation" }).click();
 
       await expect(page.getByText("User cannot run workspace jobs")).toBeVisible();
-      expect(mock.requests).toHaveLength(0);
+      expect(mock.requests).toHaveLength(1);
     } finally {
       await mock.close();
     }
