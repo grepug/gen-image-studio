@@ -13,25 +13,98 @@ async function login(page: Page, account = accounts[0]) {
   await expect(page.getByRole("heading", { name: "Gen Image Studio" })).toBeVisible();
   await page.getByLabel("Email").fill(account.email);
   await page.getByLabel("Password").fill(account.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByText(account.displayName)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
+}
+
+async function resetBrowserState(page: Page) {
+  await page.context().clearCookies();
+  await page.goto("/");
+  await page.evaluate(() => localStorage.clear());
+}
+
+async function addVirtualAuthenticator(page: Page) {
+  const client = await page.context().newCDPSession(page);
+  await client.send("WebAuthn.enable");
+  await client.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true
+    }
+  });
 }
 
 test.describe("foundation workspace flows", () => {
   test("allows all five configured test accounts to log in", async ({ page }) => {
     for (const account of accounts) {
-      await page.goto("/");
-      await page.evaluate(() => localStorage.clear());
+      await resetBrowserState(page);
       await login(page, account);
     }
+  });
+
+  test("persists and clears the server session cookie", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page);
+
+    await page.reload();
+    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByRole("heading", { name: "Gen Image Studio" })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  });
+
+  test("does not leak cached workspace data when switching users", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[0]);
+    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByLabel("Email").fill(accounts[1].email);
+    await page.getByLabel("Password").fill(accounts[1].password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+
+    await expect(page.getByText(accounts[1].displayName)).toBeVisible();
+    await expect(page.getByText(accounts[0].displayName)).toHaveCount(0);
+    const workspaceIds = await page.evaluate(async () => {
+      const response = await fetch("http://localhost:4000/graphql", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: "{ workspacesForCurrentUser { id } }"
+        })
+      });
+      const json = await response.json();
+      return json.data.workspacesForCurrentUser.map((workspace: { id: string }) => workspace.id);
+    });
+    expect(new Set(workspaceIds).size).toBe(workspaceIds.length);
+  });
+
+  test("registers a passkey and signs back in with it", async ({ page }) => {
+    await addVirtualAuthenticator(page);
+    await resetBrowserState(page);
+    await login(page);
+
+    await page.getByRole("button", { name: "Register Passkey" }).click();
+    await expect(page.getByText("Passkey registered")).toBeVisible();
+    await page.getByRole("button", { name: "Sign out" }).click();
+
+    await page.getByRole("button", { name: "Sign in with passkey" }).click();
+    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
   });
 
   test("rejects invalid password login", async ({ page }) => {
     await page.goto("/");
     await page.getByLabel("Email").fill(accounts[0].email);
     await page.getByLabel("Password").fill("wrong-password");
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByText("Invalid test login credentials")).toBeVisible();
   });
 

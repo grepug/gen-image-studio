@@ -169,6 +169,10 @@ button {
   gap: 10px;
 }
 
+.topbar-message {
+  margin-top: 8px;
+}
+
 .primary-button {
   padding: 0 14px;
   background: #245c4f;

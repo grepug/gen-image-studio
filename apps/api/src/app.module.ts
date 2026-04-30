@@ -17,7 +17,7 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
       autoSchemaFile: true,
       sortSchema: true,
       playground: true,
-      context: ({ req }: { req: unknown }) => ({ req })
+      context: ({ req, res }: { req: unknown; res: unknown }) => ({ req, res })
     }),
     DbModule,
     WorkspacesModule,

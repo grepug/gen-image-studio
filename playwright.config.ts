@@ -17,7 +17,7 @@ export default defineConfig({
     timeout: 8_000
   },
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: "http://localhost:5173",
     trace: "on-first-retry"
   },
   projects: [
@@ -29,13 +29,14 @@ export default defineConfig({
   webServer: [
     {
       command: "sh -c 'pids=$(lsof -ti:4000 || true); if [ -n \"$pids\" ]; then kill $pids; fi; docker compose down -v && docker compose up -d --wait postgres && pnpm --filter @gen-image-studio/api db:migrate && pnpm --filter @gen-image-studio/api build && pnpm --filter @gen-image-studio/api start'",
-      url: "http://127.0.0.1:4000/graphql",
+      url: "http://localhost:4000/graphql",
       reuseExistingServer: false,
       env: {
         API_PORT: "4000",
-        WEB_ORIGIN: "http://127.0.0.1:5173",
+        WEB_ORIGIN: "http://localhost:5173",
+        SESSION_SECRET: "playwright-session-secret",
         PASSKEY_RP_ID: "localhost",
-        PASSKEY_ORIGIN: "http://127.0.0.1:5173",
+        PASSKEY_ORIGIN: "http://localhost:5173",
         PROVIDER_SECRET_KEY: process.env.PROVIDER_SECRET_KEY ?? "playwright-provider-secret",
         ENABLE_E2E_PASSWORD_LOGIN: "true",
         E2E_TEST_ACCOUNTS_JSON: process.env.E2E_TEST_ACCOUNTS_JSON ?? JSON.stringify(testAccounts)
@@ -43,10 +44,10 @@ export default defineConfig({
     },
     {
       command: "sh -c 'pids=$(lsof -ti:5173 || true); if [ -n \"$pids\" ]; then kill $pids; fi; pnpm --filter @gen-image-studio/web dev'",
-      url: "http://127.0.0.1:5173",
+      url: "http://localhost:5173",
       reuseExistingServer: false,
       env: {
-        VITE_GRAPHQL_URL: "http://127.0.0.1:4000/graphql"
+        VITE_GRAPHQL_URL: "http://localhost:4000/graphql"
       }
     }
   ]
