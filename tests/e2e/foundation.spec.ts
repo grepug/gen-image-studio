@@ -384,6 +384,44 @@ version: 2.0.0
     await expectStoredSkillArchive(filePath);
   });
 
+  test("blocks workspace viewers from uploading Agent Skills", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[1]);
+    await signOut(page);
+    await login(page, accounts[0]);
+    await uploadSkillFromUi(page, "viewer-readable-skill.md", `---
+name: viewer-readable-skill
+description: Skill visible to viewer collaborators.
+version: 1.0.0
+---
+
+# Viewer Readable Skill
+`);
+    await page.getByLabel("Member email").fill(accounts[1].email);
+    await page.getByLabel("New member role").selectOption("viewer");
+    await page.getByRole("button", { name: "Add Member" }).click();
+    const ownerWorkspaceId = await currentWorkspaceId(page);
+
+    await signOut(page);
+    await login(page, accounts[1]);
+    await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
+    await expect(page.locator(".skill-item").filter({ hasText: "viewer-readable-skill" })).toBeVisible();
+
+    const filePath = await writeSkillFile("viewer-upload-skill.md", `---
+name: viewer-upload-skill
+description: Viewer upload should be rejected.
+version: 1.0.0
+---
+
+# Viewer Upload Skill
+`);
+    await page.getByLabel("Skill file").setInputFiles(filePath);
+    await page.getByRole("button", { name: "Upload Skill" }).click();
+
+    await expect(page.getByText("User cannot upload workspace skills")).toBeVisible();
+    await expect(page.locator(".skill-item").filter({ hasText: "viewer-upload-skill" })).toHaveCount(0);
+  });
+
   test("indexes a zipped Agent Skill package and generates from its SKILL.md", async ({ page }) => {
     const outputBytes = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",

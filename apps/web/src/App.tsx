@@ -198,6 +198,7 @@ export function App() {
   const providerError = providerMutation.error?.message ?? updateProviderMutation.error?.message ?? deleteProviderMutation.error?.message;
   const generationError = generationMutation.error?.message;
   const memberError = addMemberMutation.error?.message ?? updateMemberMutation.error?.message ?? removeMemberMutation.error?.message;
+  const skillError = skillMutation.error?.message;
   const skillResult = skillMutation.data?.uploadSkill;
   const skillErrors = useMemo(() => skillResult?.version.validationErrors ?? [], [skillResult]);
 
@@ -615,6 +616,7 @@ export function App() {
                   {skillErrors.length > 0 ? skillErrors.join(", ") : `Indexed ${skillResult.version.name}`}
                 </p>
               ) : null}
+              {skillError ? <p className="error-text">{skillError}</p> : null}
               <Button className="primary-button" type="submit">
                 Upload Skill
               </Button>

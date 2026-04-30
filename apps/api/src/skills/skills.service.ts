@@ -54,7 +54,7 @@ export class SkillsService {
   }
 
   async upload(input: SkillUploadInput, userId: string): Promise<SkillUploadResult> {
-    await this.assertWorkspaceMember(input.workspaceId, userId);
+    await this.assertCanWriteSkills(input.workspaceId, userId);
     const file = this.decodeUpload(input);
     const parsed = parseSkillMd(file.skillMdContent);
     const name = parsed.name || "Invalid Skill";
@@ -385,6 +385,10 @@ export class SkillsService {
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
     await this.workspaces.assertMember(workspaceId, userId);
+  }
+
+  private async assertCanWriteSkills(workspaceId: string, userId: string): Promise<void> {
+    await this.workspaces.assertCanWriteSkills(workspaceId, userId);
   }
 
   private toSkill(row: typeof skills.$inferSelect): Skill {
