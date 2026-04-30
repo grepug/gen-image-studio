@@ -195,6 +195,32 @@ version: 2.0.0
     await expect(page.getByText("SKILL.md frontmatter must include description")).toBeVisible();
   });
 
+  test("accepts a valid Agent Skill upload above the default JSON body limit", async ({ page }) => {
+    await login(page);
+    const workspaceId = await currentWorkspaceId(page);
+    const filePath = await writeSkillFile("large-valid-skill.md", `---
+name: large-valid-skill
+description: Valid upload that exercises GraphQL body parser limits.
+---
+
+# Large Valid Skill
+
+${"A".repeat(192 * 1024)}
+`);
+    const bytes = await readFile(filePath);
+    const upload = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(bytes).digest("hex"),
+      fileName: "large-valid-skill.md",
+      mimeType: "text/markdown",
+      byteSize: bytes.length,
+      contentBase64: bytes.toString("base64")
+    });
+    expect(upload.errors).toBeUndefined();
+    expect(upload.data?.uploadSkill.skill.id).toBeTruthy();
+    await expectStoredSkillArchive(filePath);
+  });
+
   test("rejects skill uploads with invalid archive metadata", async ({ page }) => {
     await login(page);
     const workspaceId = await currentWorkspaceId(page);
@@ -282,7 +308,7 @@ async function uploadSkillViaGraphql(
     byteSize: number;
     contentBase64: string;
   }
-): Promise<{ errors?: { message: string }[] }> {
+): Promise<{ data?: { uploadSkill: { skill: { id: string } } }; errors?: { message: string }[] }> {
   return page.evaluate(async (uploadInput) => {
     const response = await fetch("http://localhost:4000/graphql", {
       method: "POST",

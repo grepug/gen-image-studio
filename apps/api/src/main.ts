@@ -1,10 +1,15 @@
 import "reflect-metadata";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 
+const uploadBodyLimit = "1mb";
+
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.useBodyParser("json", { limit: uploadBodyLimit });
+  app.useBodyParser("urlencoded", { extended: true, limit: uploadBodyLimit });
   const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:5173";
   app.enableCors({
     origin: webOrigin,
@@ -17,4 +22,3 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
-
