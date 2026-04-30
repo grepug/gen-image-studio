@@ -12,7 +12,7 @@ import type {
   RegistrationResponseJSON,
   WebAuthnCredential
 } from "@simplewebauthn/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { DB } from "../db/db.module";
 import { passkeyCredentials, users, webauthnChallenges } from "../db/schema";
 import { AppDb } from "../db/types";
@@ -68,7 +68,8 @@ export class AuthService {
         transports: credential.transports as AuthenticatorTransportFuture[]
       })),
       authenticatorSelection: {
-        residentKey: "preferred",
+        residentKey: "required",
+        requireResidentKey: true,
         userVerification: "preferred"
       }
     });
@@ -190,23 +191,20 @@ export class AuthService {
 
   private async consumeChallenge(challengeId: string, purpose: "authentication" | "registration") {
     const [challenge] = await this.db
-      .select()
-      .from(webauthnChallenges)
+      .update(webauthnChallenges)
+      .set({ consumedAt: new Date() })
       .where(
         and(
           eq(webauthnChallenges.id, challengeId),
           eq(webauthnChallenges.purpose, purpose),
-          isNull(webauthnChallenges.consumedAt)
+          isNull(webauthnChallenges.consumedAt),
+          gt(webauthnChallenges.expiresAt, new Date())
         )
       )
-      .limit(1);
-    if (!challenge || challenge.expiresAt.getTime() <= Date.now()) {
+      .returning();
+    if (!challenge) {
       throw new BadRequestException("Passkey challenge is missing or expired");
     }
-    await this.db
-      .update(webauthnChallenges)
-      .set({ consumedAt: new Date() })
-      .where(eq(webauthnChallenges.id, challenge.id));
     return challenge;
   }
 

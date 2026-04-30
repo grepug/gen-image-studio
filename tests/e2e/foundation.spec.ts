@@ -59,6 +59,33 @@ test.describe("foundation workspace flows", () => {
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   });
 
+  test("does not leak cached workspace data when switching users", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[0]);
+    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByLabel("Email").fill(accounts[1].email);
+    await page.getByLabel("Password").fill(accounts[1].password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+
+    await expect(page.getByText(accounts[1].displayName)).toBeVisible();
+    await expect(page.getByText(accounts[0].displayName)).toHaveCount(0);
+    const workspaceIds = await page.evaluate(async () => {
+      const response = await fetch("http://localhost:4000/graphql", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: "{ workspacesForCurrentUser { id } }"
+        })
+      });
+      const json = await response.json();
+      return json.data.workspacesForCurrentUser.map((workspace: { id: string }) => workspace.id);
+    });
+    expect(new Set(workspaceIds).size).toBe(workspaceIds.length);
+  });
+
   test("registers a passkey and signs back in with it", async ({ page }) => {
     await addVirtualAuthenticator(page);
     await resetBrowserState(page);

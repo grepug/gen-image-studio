@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@apollo/client";
+import { useApolloClient, useMutation, useQuery } from "@apollo/client";
 import { Button } from "@base-ui/react/button";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
@@ -67,6 +67,7 @@ interface LoggedInUser {
 }
 
 export function App() {
+  const apollo = useApolloClient();
   const [email, setEmail] = useState("tester1@example.test");
   const [password, setPassword] = useState("test-password-1");
   const [providerName, setProviderName] = useState("Local OpenAI Compatible");
@@ -122,7 +123,7 @@ version: 0.1.0
     const result = await loginWithPassword({ variables: { email, password } });
     const user = result.data?.loginWithPassword as LoggedInUser | undefined;
     if (user) {
-      await currentUserQuery.refetch();
+      await apollo.resetStore();
       return;
     }
     setLoginMessage("Invalid test login credentials");
@@ -138,7 +139,7 @@ version: 0.1.0
       await finishPasskeyAuthenticationMutation({
         variables: { challengeId: payload.challengeId, responseJson: JSON.stringify(response) }
       });
-      await currentUserQuery.refetch();
+      await apollo.resetStore();
     } catch (error) {
       setLoginMessage(error instanceof Error ? error.message : "Passkey sign-in failed");
     }
@@ -155,7 +156,7 @@ version: 0.1.0
         variables: { challengeId: payload.challengeId, responseJson: JSON.stringify(response) }
       });
       setPasskeyMessage("Passkey registered");
-      await currentUserQuery.refetch();
+      await apollo.resetStore();
     } catch (error) {
       setPasskeyMessage(error instanceof Error ? error.message : "Passkey registration failed");
     }
@@ -163,6 +164,7 @@ version: 0.1.0
 
   async function handleLogout() {
     await logoutMutation();
+    await apollo.clearStore();
     await currentUserQuery.refetch();
   }
 
