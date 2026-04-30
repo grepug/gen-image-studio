@@ -96,14 +96,7 @@ export function App() {
   const [memberEmail, setMemberEmail] = useState("tester2@example.test");
   const [memberRole, setMemberRole] = useState<WorkspaceRole>("member");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
-  const [skillMd, setSkillMd] = useState(`---
-name: studio-image-style
-description: Creates images in the workspace house style.
-version: 0.1.0
----
-
-# Studio Image Style
-`);
+  const [skillFile, setSkillFile] = useState<File | null>(null);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
   const currentUserQuery = useQuery<DashboardData>(CURRENT_USER_QUERY, {
@@ -224,13 +217,21 @@ version: 0.1.0
 
   async function handleSkillSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeWorkspace) return;
+    if (!activeWorkspace || !skillFile) return;
+    const fileBuffer = await skillFile.arrayBuffer();
+    const bytes = new Uint8Array(fileBuffer);
+    const archiveSha256 = await sha256Hex(fileBuffer);
+    const contentBase64 = bytesToBase64(bytes);
     await uploadSkill({
       variables: {
         input: {
           workspaceId: activeWorkspace.id,
-          archiveSha256: "e2e-skill-archive",
-          skillMdContent: skillMd,
+          archiveSha256,
+          fileName: skillFile.name,
+          mimeType: skillFile.type || "text/markdown",
+          byteSize: skillFile.size,
+          contentBase64,
+          skillMdContent: "",
           permissions: ["use-provider", "write-workspace-assets"]
         }
       },
@@ -452,8 +453,12 @@ version: 0.1.0
             </div>
             <form className="stacked-form" onSubmit={handleSkillSubmit}>
               <label>
-                SKILL.md
-                <textarea value={skillMd} onChange={(event) => setSkillMd(event.target.value)} rows={8} />
+                SKILL.md file
+                <input
+                  type="file"
+                  accept=".md,text/markdown,text/plain"
+                  onChange={(event) => setSkillFile(event.target.files?.[0] ?? null)}
+                />
               </label>
               {skillResult ? (
                 <p className={skillErrors.length > 0 ? "error-text" : "success-text"}>
@@ -461,7 +466,7 @@ version: 0.1.0
                 </p>
               ) : null}
               <Button className="primary-button" type="submit">
-                Validate Skill
+                Upload Skill
               </Button>
             </form>
           </section>
@@ -523,4 +528,17 @@ version: 0.1.0
       </section>
     </main>
   );
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
 }

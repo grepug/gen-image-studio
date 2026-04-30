@@ -1,4 +1,7 @@
 import { expect, Page, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const accounts = [
   { email: "tester1@example.test", password: "test-password-1", displayName: "Tester 1" },
@@ -162,10 +165,9 @@ test.describe("foundation workspace flows", () => {
     await expect(page.getByText("super-secret-e2e-key")).toHaveCount(0);
   });
 
-  test("indexes a valid Agent Skill from SKILL.md content", async ({ page }) => {
+  test("indexes a valid Agent Skill from an uploaded SKILL.md file", async ({ page }) => {
     await login(page);
-
-    await page.getByLabel("SKILL.md").fill(`---
+    const filePath = await writeSkillFile("valid-skill.md", `---
 name: e2e-image-skill
 description: Generates images for the Playwright flow.
 version: 2.0.0
@@ -173,17 +175,20 @@ version: 2.0.0
 
 # E2E Image Skill
 `);
-    await page.getByRole("button", { name: "Validate Skill" }).click();
+    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("Indexed e2e-image-skill")).toBeVisible();
     await expect(page.locator(".skill-item").filter({ hasText: "e2e-image-skill" })).toBeVisible();
+    await expectStoredSkillArchive(filePath);
   });
 
-  test("shows validation errors for invalid Agent Skill content", async ({ page }) => {
+  test("shows validation errors for an invalid Agent Skill file", async ({ page }) => {
     await login(page);
+    const filePath = await writeSkillFile("invalid-skill.md", "# No frontmatter here");
 
-    await page.getByLabel("SKILL.md").fill("# No frontmatter here");
-    await page.getByRole("button", { name: "Validate Skill" }).click();
+    await page.getByLabel("SKILL.md file").setInputFiles(filePath);
+    await page.getByRole("button", { name: "Upload Skill" }).click();
 
     await expect(page.getByText("SKILL.md must start with YAML frontmatter")).toBeVisible();
     await expect(page.getByText("SKILL.md frontmatter must include name")).toBeVisible();
@@ -204,4 +209,19 @@ async function currentWorkspaceId(page: Page): Promise<string> {
     const json = await response.json();
     return json.data.workspacesForCurrentUser[0].id as string;
   });
+}
+
+async function writeSkillFile(name: string, content: string): Promise<string> {
+  const dir = join(process.cwd(), "test-results", "skill-fixtures");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, content);
+  return path;
+}
+
+async function expectStoredSkillArchive(filePath: string): Promise<void> {
+  const bytes = await readFile(filePath);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const storedBytes = await readFile(join(process.cwd(), "apps/api/.data/assets/skill-archives", `${sha256}.md`));
+  expect(storedBytes.equals(bytes)).toBe(true);
 }
