@@ -14,8 +14,13 @@ async function login(page: Page, account = accounts[0]) {
   await page.getByLabel("Email").fill(account.email);
   await page.getByLabel("Password").fill(account.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByText(account.displayName)).toBeVisible();
+  await expect(page.locator(".topbar .eyebrow")).toHaveText(account.displayName);
   await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
+}
+
+async function signOut(page: Page) {
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Gen Image Studio" })).toBeVisible();
 }
 
 async function resetBrowserState(page: Page) {
@@ -51,7 +56,7 @@ test.describe("foundation workspace flows", () => {
     await login(page);
 
     await page.reload();
-    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+    await expect(page.locator(".topbar .eyebrow")).toHaveText(accounts[0].displayName);
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page.getByRole("heading", { name: "Gen Image Studio" })).toBeVisible();
 
@@ -62,15 +67,14 @@ test.describe("foundation workspace flows", () => {
   test("does not leak cached workspace data when switching users", async ({ page }) => {
     await resetBrowserState(page);
     await login(page, accounts[0]);
-    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+    await expect(page.locator(".topbar .eyebrow")).toHaveText(accounts[0].displayName);
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByLabel("Email").fill(accounts[1].email);
     await page.getByLabel("Password").fill(accounts[1].password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
-    await expect(page.getByText(accounts[1].displayName)).toBeVisible();
-    await expect(page.getByText(accounts[0].displayName)).toHaveCount(0);
+    await expect(page.locator(".topbar .eyebrow")).toHaveText(accounts[1].displayName);
     const workspaceIds = await page.evaluate(async () => {
       const response = await fetch("http://localhost:4000/graphql", {
         method: "POST",
@@ -96,8 +100,41 @@ test.describe("foundation workspace flows", () => {
     await page.getByRole("button", { name: "Sign out" }).click();
 
     await page.getByRole("button", { name: "Sign in with passkey" }).click();
-    await expect(page.getByText(accounts[0].displayName)).toBeVisible();
+    await expect(page.locator(".topbar .eyebrow")).toHaveText(accounts[0].displayName);
     await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
+  });
+
+  test("lets an owner add, update, and remove a workspace collaborator", async ({ page }) => {
+    await resetBrowserState(page);
+    await login(page, accounts[1]);
+    await signOut(page);
+    await login(page, accounts[0]);
+
+    await page.getByLabel("Member email").fill(accounts[1].email);
+    await page.getByLabel("New member role").selectOption("member");
+    await page.getByRole("button", { name: "Add Member" }).click();
+    await expect(page.getByText(accounts[1].displayName)).toBeVisible();
+    await expect(page.getByLabel(`Role for ${accounts[1].displayName}`)).toHaveValue("member");
+
+    await signOut(page);
+    await login(page, accounts[1]);
+    await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
+    await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toBeVisible();
+
+    await page.getByLabel("Member email").fill(accounts[2].email);
+    await page.getByRole("button", { name: "Add Member" }).click();
+    await expect(page.getByText("User cannot manage workspace members")).toBeVisible();
+
+    await signOut(page);
+    await login(page, accounts[0]);
+    await page.getByLabel(`Role for ${accounts[1].displayName}`).selectOption("viewer");
+    await expect(page.getByLabel(`Role for ${accounts[1].displayName}`)).toHaveValue("viewer");
+    await page.locator(".member-item").filter({ hasText: accounts[1].displayName }).getByRole("button", { name: "Remove" }).click();
+    await expect(page.locator(".member-item").filter({ hasText: accounts[1].displayName })).toHaveCount(0);
+
+    await signOut(page);
+    await login(page, accounts[1]);
+    await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toHaveCount(0);
   });
 
   test("rejects invalid password login", async ({ page }) => {

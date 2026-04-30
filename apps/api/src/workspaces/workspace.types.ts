@@ -1,4 +1,4 @@
-import { Field, ObjectType, registerEnumType } from "@nestjs/graphql";
+import { Field, InputType, ObjectType, registerEnumType } from "@nestjs/graphql";
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
 
@@ -36,6 +36,48 @@ export class WorkspaceMembership {
 
   @Field()
   userId: string;
+
+  @Field(() => WorkspaceRoleGql)
+  role: WorkspaceRole;
+}
+
+@ObjectType()
+export class WorkspaceMember {
+  @Field()
+  id: string;
+
+  @Field()
+  workspaceId: string;
+
+  @Field()
+  userId: string;
+
+  @Field()
+  displayName: string;
+
+  @Field({ nullable: true })
+  email?: string;
+
+  @Field(() => WorkspaceRoleGql)
+  role: WorkspaceRole;
+}
+
+@InputType()
+export class AddWorkspaceMemberInput {
+  @Field()
+  workspaceId: string;
+
+  @Field()
+  email: string;
+
+  @Field(() => WorkspaceRoleGql)
+  role: WorkspaceRole;
+}
+
+@InputType()
+export class UpdateWorkspaceMemberRoleInput {
+  @Field()
+  membershipId: string;
 
   @Field(() => WorkspaceRoleGql)
   role: WorkspaceRole;
