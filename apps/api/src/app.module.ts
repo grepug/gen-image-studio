@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { GraphQLModule } from "@nestjs/graphql";
 import { AiModule } from "./ai/ai.module";
+import { AssetsModule } from "./assets/assets.module";
 import { AuthModule } from "./auth/auth.module";
 import { DbModule } from "./db/db.module";
 import { JobsModule } from "./jobs/jobs.module";
@@ -25,6 +26,7 @@ import { WorkspacesModule } from "./workspaces/workspaces.module";
     AuthModule,
     ProviderProfilesModule,
     AiModule,
+    AssetsModule,
     SkillsModule,
     JobsModule
   ]

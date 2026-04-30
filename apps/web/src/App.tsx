@@ -53,7 +53,7 @@ interface GenerationJobOutput {
   mimeType: string;
   byteSize: number;
   sha256: string;
-  storagePath: string;
+  assetUrl: string;
 }
 
 interface GenerationJobEvent {
@@ -595,9 +595,23 @@ export function App() {
                       <span>{job.prompt}</span>
                       {latestEvent?.message ? <span>{latestEvent.message}</span> : null}
                       {job.outputs.map((output) => (
-                        <span key={output.id}>
-                          {output.label} - {output.mimeType} - {output.byteSize} bytes
-                        </span>
+                        <div className="job-output" key={output.id}>
+                          {output.mimeType.startsWith("image/") ? (
+                            <img
+                              alt={`${output.label} generated image`}
+                              className="job-output-image"
+                              src={resolveApiUrl(output.assetUrl)}
+                            />
+                          ) : null}
+                          <div className="job-output-meta">
+                            <span>
+                              {output.label} - {output.mimeType} - {output.byteSize} bytes
+                            </span>
+                            <a href={resolveApiUrl(output.assetUrl)} target="_blank" rel="noreferrer">
+                              Open image
+                            </a>
+                          </div>
+                        </div>
                       ))}
                     </article>
                   );
@@ -676,4 +690,9 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(byte);
   });
   return btoa(binary);
+}
+
+function resolveApiUrl(path: string): string {
+  const graphqlUrl = import.meta.env.VITE_GRAPHQL_URL ?? "http://localhost:4000/graphql";
+  return new URL(path, graphqlUrl).toString();
 }

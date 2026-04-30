@@ -51,7 +51,7 @@ export class JobOutput {
   sha256: string;
 
   @Field()
-  storagePath: string;
+  assetUrl: string;
 
   @Field()
   createdAt: string;

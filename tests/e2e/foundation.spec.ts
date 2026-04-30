@@ -1,4 +1,4 @@
-import { expect, Page, test } from "@playwright/test";
+import { expect, Locator, Page, test } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, Server } from "node:http";
@@ -397,6 +397,12 @@ Always produce a sharp product image.
       await expect(page.getByLabel("Generation history")).toContainText("Job succeeded");
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
       await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
+      const image = page.getByAltText("generated-image generated image").first();
+      await expect(image).toBeVisible();
+      const fetchedImage = await fetchElementImage(page, image);
+      expect(fetchedImage.status).toBe(200);
+      expect(fetchedImage.contentType).toContain("image/png");
+      expect(fetchedImage.bytes.equals(outputBytes)).toBe(true);
       expect(mock.requests[0]?.headers.authorization).toBe("Bearer mock-secret-key");
       expect(mock.requests[0]?.body.model).toBe("gpt-mock-responses");
       expect(mock.requests[0]?.body.stream).toBe(true);
@@ -526,6 +532,9 @@ description: Viewer block skill.
       await page.getByRole("button", { name: "Run Generation" }).click();
       await expect.poll(() => mock.requests.length).toBe(1);
       await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
+      const ownerImage = page.getByAltText("generated-image generated image").first();
+      await expect(ownerImage).toBeVisible();
+      const ownerAssetUrl = await elementImageSrc(ownerImage);
       await page.getByLabel("Member email").fill(accounts[1].email);
       await page.getByLabel("New member role").selectOption("viewer");
       await page.getByRole("button", { name: "Add Member" }).click();
@@ -536,6 +545,11 @@ description: Viewer block skill.
       await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
       await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
       await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
+      const viewerImage = page.getByAltText("generated-image generated image").first();
+      await expect(viewerImage).toBeVisible();
+      const viewerFetch = await fetchUrlBytes(page, ownerAssetUrl);
+      expect(viewerFetch.status).toBe(200);
+      expect(viewerFetch.contentType).toContain("image/png");
       await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
       await page.getByLabel("Image prompt").fill("Viewer should not run this.");
@@ -543,6 +557,11 @@ description: Viewer block skill.
 
       await expect(page.getByText("User cannot run workspace jobs")).toBeVisible();
       expect(mock.requests).toHaveLength(1);
+
+      await signOut(page);
+      await login(page, accounts[4]);
+      const nonMemberFetch = await fetchUrlBytes(page, ownerAssetUrl);
+      expect(nonMemberFetch.status).toBe(403);
     } finally {
       await mock.close();
     }
@@ -592,6 +611,7 @@ description: Shared history skill.
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
       await expect(page.getByLabel("Generation history")).toContainText("Job succeeded");
       await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
+      await expect(page.getByAltText("generated-image generated image").first()).toBeVisible();
     } finally {
       await mock.close();
     }
@@ -785,6 +805,35 @@ async function uploadSkillFromUi(page: Page, fileName: string, content: string):
   if (skillName) {
     await expect(page.getByText(`Indexed ${skillName}`)).toBeVisible();
   }
+}
+
+async function fetchElementImage(page: Page, locator: Locator) {
+  return fetchUrlBytes(page, await elementImageSrc(locator));
+}
+
+async function elementImageSrc(locator: Locator): Promise<string> {
+  const src = await locator.getAttribute("src");
+  if (!src) {
+    throw new Error("Expected generated image to have a src");
+  }
+  return src;
+}
+
+async function fetchUrlBytes(page: Page, url: string): Promise<{ bytes: Buffer; contentType: string; status: number }> {
+  const result = await page.evaluate(async (imageUrl) => {
+    const response = await fetch(imageUrl, { cache: "no-store", credentials: "include" });
+    const bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
+    return {
+      bytes,
+      contentType: response.headers.get("content-type") ?? "",
+      status: response.status
+    };
+  }, url);
+  return {
+    bytes: Buffer.from(result.bytes),
+    contentType: result.contentType,
+    status: result.status
+  };
 }
 
 async function selectValueForLabel(page: Page, label: string, optionLabel: string): Promise<string> {
