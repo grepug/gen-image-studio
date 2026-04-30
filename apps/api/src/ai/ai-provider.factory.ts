@@ -7,14 +7,14 @@ import { ProviderProfilesService } from "../provider-profiles/provider-profiles.
 export class AiProviderFactory {
   constructor(private readonly providerProfiles: ProviderProfilesService) {}
 
-  createLanguageModel(profileId: string): LanguageModelV1 {
-    const profile = this.providerProfiles.getStored(profileId);
+  async createLanguageModel(profileId: string): Promise<LanguageModelV1> {
+    const profile = await this.providerProfiles.getStored(profileId);
     if (!profile) {
       throw new NotFoundException("Provider profile not found");
     }
     const provider = createOpenAI({
       baseURL: profile.baseUrl,
-      apiKey: this.providerProfiles.getApiKey(profileId)
+      apiKey: await this.providerProfiles.getApiKey(profileId)
     });
     return provider(profile.defaultModel);
   }

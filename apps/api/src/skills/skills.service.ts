@@ -1,62 +1,140 @@
 import { Injectable } from "@nestjs/common";
+import { Inject } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { isoNow } from "../common/date";
+import { eq } from "drizzle-orm";
+import { DB } from "../db/db.module";
+import { assets, skills, skillVersions } from "../db/schema";
+import { AppDb } from "../db/types";
 import { WorkspacesService } from "../workspaces/workspaces.service";
 import { parseSkillMd } from "./skill-md.parser";
 import { Skill, SkillUploadInput, SkillUploadResult, SkillVersion } from "./skill.types";
 
 @Injectable()
 export class SkillsService {
-  private readonly skills = new Map<string, Skill>();
-  private readonly versions = new Map<string, SkillVersion[]>();
+  constructor(
+    private readonly workspaces: WorkspacesService,
+    @Inject(DB) private readonly db: AppDb
+  ) {}
 
-  constructor(private readonly workspaces: WorkspacesService) {}
-
-  list(workspaceId: string, userId: string): Skill[] {
-    this.assertWorkspaceMember(workspaceId, userId);
-    return [...this.skills.values()].filter((skill) => skill.workspaceId === workspaceId);
+  async list(workspaceId: string, userId: string): Promise<Skill[]> {
+    await this.assertWorkspaceMember(workspaceId, userId);
+    const rows = await this.db.select().from(skills).where(eq(skills.workspaceId, workspaceId));
+    return rows.map((row) => this.toSkill(row));
   }
 
-  upload(input: SkillUploadInput, userId: string): SkillUploadResult {
-    this.assertWorkspaceMember(input.workspaceId, userId);
+  async upload(input: SkillUploadInput, userId: string): Promise<SkillUploadResult> {
+    await this.assertWorkspaceMember(input.workspaceId, userId);
     const parsed = parseSkillMd(input.skillMdContent);
-    const now = isoNow();
-    const skill: Skill = {
-      id: randomUUID(),
-      workspaceId: input.workspaceId,
-      name: parsed.name || "Invalid Skill",
-      slug: this.slugify(parsed.name || `invalid-${Date.now()}`),
-      status: "active",
-      createdAt: now,
-      updatedAt: now
+    const name = parsed.name || "Invalid Skill";
+    const result = await this.db.transaction(async (tx) => {
+      const [archiveAsset] = await tx
+        .insert(assets)
+        .values({
+          workspaceId: input.workspaceId,
+          ownerId: userId,
+          kind: "skill-archive",
+          mimeType: "text/markdown",
+          byteSize: Buffer.byteLength(input.skillMdContent),
+          sha256: input.archiveSha256,
+          storagePath: `skill-archives/${input.archiveSha256}`
+        })
+        .returning();
+      if (!archiveAsset) {
+        throw new Error("Skill archive asset creation failed");
+      }
+
+      const [skill] = await tx
+        .insert(skills)
+        .values({
+          workspaceId: input.workspaceId,
+          ownerId: userId,
+          name,
+          slug: `${this.slugify(name)}-${randomUUID().slice(0, 8)}`,
+          status: "active"
+        })
+        .returning();
+      if (!skill) {
+        throw new Error("Skill creation failed");
+      }
+
+      const metadata = {
+        name: parsed.name,
+        description: parsed.description,
+        ...(parsed.version ? { version: parsed.version } : {})
+      };
+      const [version] = await tx
+        .insert(skillVersions)
+        .values({
+          skillId: skill.id,
+          archiveAssetId: archiveAsset.id,
+          version: parsed.version,
+          metadata,
+          permissions: input.permissions,
+          validationStatus: parsed.errors.length === 0 ? "valid" : "invalid",
+          validationErrors: parsed.errors
+        })
+        .returning();
+      if (!version) {
+        throw new Error("Skill version creation failed");
+      }
+
+      const [updatedSkill] = await tx
+        .update(skills)
+        .set({ latestVersionId: version.id })
+        .where(eq(skills.id, skill.id))
+        .returning();
+      if (!updatedSkill) {
+        throw new Error("Skill latest version update failed");
+      }
+
+      return {
+        skill: updatedSkill,
+        version
+      };
+    });
+    return {
+      skill: this.toSkill(result.skill),
+      version: this.toSkillVersion(result.version)
     };
-    const version: SkillVersion = {
-      id: randomUUID(),
-      skillId: skill.id,
-      version: parsed.version,
-      name: parsed.name,
-      description: parsed.description,
-      permissions: input.permissions,
-      validationStatus: parsed.errors.length === 0 ? "valid" : "invalid",
-      validationErrors: parsed.errors,
-      createdAt: now
-    };
-    skill.latestVersionId = version.id;
-    this.skills.set(skill.id, skill);
-    this.versions.set(skill.id, [version]);
-    void input.archiveSha256;
-    return { skill, version };
   }
 
   private slugify(value: string): string {
-    return value
+    const slug = value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80);
+    return slug || "skill";
   }
 
-  private assertWorkspaceMember(workspaceId: string, userId: string): void {
-    this.workspaces.assertMember(workspaceId, userId);
+  private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+    await this.workspaces.assertMember(workspaceId, userId);
+  }
+
+  private toSkill(row: typeof skills.$inferSelect): Skill {
+    return {
+      id: row.id,
+      workspaceId: row.workspaceId,
+      name: row.name,
+      slug: row.slug,
+      status: row.status,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      ...(row.latestVersionId ? { latestVersionId: row.latestVersionId } : {})
+    };
+  }
+
+  private toSkillVersion(row: typeof skillVersions.$inferSelect): SkillVersion {
+    return {
+      id: row.id,
+      skillId: row.skillId,
+      version: row.version,
+      name: row.metadata.name,
+      description: row.metadata.description,
+      permissions: row.permissions,
+      validationStatus: row.validationStatus,
+      validationErrors: row.validationErrors,
+      createdAt: row.createdAt.toISOString()
+    };
   }
 }

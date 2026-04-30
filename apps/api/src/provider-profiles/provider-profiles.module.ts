@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
+import { DbModule } from "../db/db.module";
 import { WorkspacesModule } from "../workspaces/workspaces.module";
 import { ProviderProfilesResolver } from "./provider-profiles.resolver";
 import { ProviderProfilesService } from "./provider-profiles.service";
 
 @Module({
-  imports: [WorkspacesModule],
+  imports: [DbModule, WorkspacesModule],
   providers: [ProviderProfilesService, ProviderProfilesResolver],
   exports: [ProviderProfilesService]
 })
