@@ -27,7 +27,6 @@
     "ai": "^4.1.16",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.4",
-    "fflate": "0.8.2",
     "graphql": "^16.10.0",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

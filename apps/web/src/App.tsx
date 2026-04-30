@@ -285,7 +285,7 @@ export function App() {
           workspaceId: activeWorkspace.id,
           archiveSha256,
           fileName: skillFile.name,
-          mimeType: skillFile.type || "text/markdown",
+          mimeType: skillFile.type || fallbackSkillMimeType(skillFile.name),
           byteSize: skillFile.size,
           contentBase64,
           permissions: ["use-provider", "write-workspace-assets"]
@@ -695,4 +695,8 @@ function bytesToBase64(bytes: Uint8Array): string {
 function resolveApiUrl(path: string): string {
   const graphqlUrl = import.meta.env.VITE_GRAPHQL_URL ?? "http://localhost:4000/graphql";
   return new URL(path, graphqlUrl).toString();
+}
+
+function fallbackSkillMimeType(fileName: string): string {
+  return fileName.toLowerCase().endsWith(".zip") ? "application/octet-stream" : "text/markdown";
 }

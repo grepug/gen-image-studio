@@ -325,6 +325,11 @@ Always render a polished packaged skill image.
       expect(mock.requests[0]?.body.input).toContain(prompt);
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
       await expect(page.getByAltText("generated-image generated image").first()).toBeVisible();
+
+      const emptyMimeUpload = await uploadZipSkillViaGraphql(page, await currentWorkspaceId(page), "empty-mime-package.zip", {
+        "SKILL.md": validSkillMarkdown("empty-mime-package")
+      }, "");
+      expect(emptyMimeUpload.data?.uploadSkill.skill.id).toBeTruthy();
     } finally {
       await mock.close();
     }
@@ -443,6 +448,21 @@ description: Hash mismatch check.
       contentBase64: oversizedBytes.toString("base64")
     });
     expect(oversized.errors?.[0]?.message).toContain("512KB");
+
+    const compressedBombBytes = createZipBytes({
+      "SKILL.md": validSkillMarkdown("compressed-bomb"),
+      "references/huge.txt": "0".repeat(2 * 1024 * 1024 + 1)
+    });
+    expect(compressedBombBytes.length).toBeLessThan(512 * 1024);
+    const compressedBomb = await uploadSkillViaGraphql(page, {
+      workspaceId,
+      archiveSha256: createHash("sha256").update(compressedBombBytes).digest("hex"),
+      fileName: "compressed-bomb.zip",
+      mimeType: "application/zip",
+      byteSize: compressedBombBytes.length,
+      contentBase64: compressedBombBytes.toString("base64")
+    });
+    expect(compressedBomb.errors?.[0]?.message).toContain("2MB");
   });
 
   test("runs an uploaded Agent Skill through a gen-gallery compatible responses stream", async ({ page }) => {
@@ -911,14 +931,15 @@ async function uploadZipSkillViaGraphql(
   page: Page,
   workspaceId: string,
   fileName: string,
-  entries: Record<string, string>
+  entries: Record<string, string>,
+  mimeType = "application/zip"
 ): Promise<{ data?: { uploadSkill: { skill: { id: string } } }; errors?: { message: string }[] }> {
   const bytes = createZipBytes(entries);
   return uploadSkillViaGraphql(page, {
     workspaceId,
     archiveSha256: createHash("sha256").update(bytes).digest("hex"),
     fileName,
-    mimeType: "application/zip",
+    mimeType,
     byteSize: bytes.length,
     contentBase64: bytes.toString("base64")
   });

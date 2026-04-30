@@ -3,8 +3,8 @@ import { Inject } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import { eq } from "drizzle-orm";
-import { unzipSync } from "fflate";
 import { DB } from "../db/db.module";
 import { assets, skills, skillVersions } from "../db/schema";
 import { AppDb } from "../db/types";
@@ -15,6 +15,17 @@ import { Skill, SkillUploadInput, SkillUploadResult, SkillVersion } from "./skil
 const maxSkillUploadBytes = 256 * 1024;
 const maxSkillPackageUploadBytes = 512 * 1024;
 const maxExtractedSkillMdBytes = 256 * 1024;
+const maxSkillPackageEntries = 100;
+const maxSkillPackageUncompressedBytes = 2 * 1024 * 1024;
+
+interface ZipEntryMetadata {
+  name: string;
+  compressionMethod: number;
+  flags: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localHeaderOffset: number;
+}
 
 interface DecodedSkillUpload {
   archiveBytes: Buffer;
@@ -206,20 +217,8 @@ export class SkillsService {
     if (input.mimeType && !["application/zip", "application/x-zip-compressed", "application/octet-stream"].includes(input.mimeType)) {
       throw new BadRequestException("Skill package MIME type must be zip or octet-stream");
     }
-    let entries: Record<string, Uint8Array>;
-    try {
-      entries = unzipSync(new Uint8Array(bytes));
-    } catch {
-      throw new BadRequestException("Skill package must be a valid zip archive");
-    }
-    const normalizedEntries = Object.entries(entries).map(([name, content]) => ({
-      name: this.normalizeZipPath(name),
-      content
-    }));
-    if (normalizedEntries.some((entry) => !entry.name)) {
-      throw new BadRequestException("Skill package entries must have safe relative paths");
-    }
-    const skillMdEntries = normalizedEntries.filter((entry) => entry.name.endsWith("/SKILL.md") || entry.name === "SKILL.md");
+    const entries = this.readZipEntries(bytes);
+    const skillMdEntries = entries.filter((entry) => entry.name.endsWith("/SKILL.md") || entry.name === "SKILL.md");
     if (skillMdEntries.length === 0) {
       throw new BadRequestException("Skill package must contain SKILL.md");
     }
@@ -231,7 +230,7 @@ export class SkillsService {
       throw new BadRequestException("Skill package must contain SKILL.md");
     }
     this.assertAllowedSkillMdLocation(skillMdEntry.name);
-    const skillMdBytes = Buffer.from(skillMdEntry.content);
+    const skillMdBytes = this.readZipEntryBytes(bytes, skillMdEntry);
     if (skillMdBytes.length <= 0) {
       throw new BadRequestException("Skill package SKILL.md must not be empty");
     }
@@ -251,6 +250,99 @@ export class SkillsService {
       },
       skillMdContent: skillMdBytes.toString("utf8")
     };
+  }
+
+  private readZipEntries(bytes: Buffer): ZipEntryMetadata[] {
+    const eocdOffset = this.findEndOfCentralDirectory(bytes);
+    const diskNumber = bytes.readUInt16LE(eocdOffset + 4);
+    const centralDirDisk = bytes.readUInt16LE(eocdOffset + 6);
+    const entryCount = bytes.readUInt16LE(eocdOffset + 10);
+    const centralDirSize = bytes.readUInt32LE(eocdOffset + 12);
+    const centralDirOffset = bytes.readUInt32LE(eocdOffset + 16);
+    if (diskNumber !== 0 || centralDirDisk !== 0) {
+      throw new BadRequestException("Skill package must be a single-disk zip archive");
+    }
+    if (entryCount === 0xffff || centralDirSize === 0xffffffff || centralDirOffset === 0xffffffff) {
+      throw new BadRequestException("Skill package zip64 archives are not supported");
+    }
+    if (entryCount <= 0 || entryCount > maxSkillPackageEntries) {
+      throw new BadRequestException(`Skill package must contain between 1 and ${maxSkillPackageEntries} entries`);
+    }
+    if (centralDirOffset + centralDirSize > bytes.length) {
+      throw new BadRequestException("Skill package central directory is invalid");
+    }
+
+    const entries: ZipEntryMetadata[] = [];
+    let offset = centralDirOffset;
+    let totalUncompressedBytes = 0;
+    for (let index = 0; index < entryCount; index += 1) {
+      if (offset + 46 > bytes.length || bytes.readUInt32LE(offset) !== 0x02014b50) {
+        throw new BadRequestException("Skill package central directory is invalid");
+      }
+      const flags = bytes.readUInt16LE(offset + 8);
+      const compressionMethod = bytes.readUInt16LE(offset + 10);
+      const compressedSize = bytes.readUInt32LE(offset + 20);
+      const uncompressedSize = bytes.readUInt32LE(offset + 24);
+      const fileNameLength = bytes.readUInt16LE(offset + 28);
+      const extraLength = bytes.readUInt16LE(offset + 30);
+      const commentLength = bytes.readUInt16LE(offset + 32);
+      const localHeaderOffset = bytes.readUInt32LE(offset + 42);
+      const nameStart = offset + 46;
+      const nextOffset = nameStart + fileNameLength + extraLength + commentLength;
+      if (nextOffset > bytes.length) {
+        throw new BadRequestException("Skill package central directory is invalid");
+      }
+      if ((flags & 0x1) !== 0) {
+        throw new BadRequestException("Skill package encrypted entries are not supported");
+      }
+      if (![0, 8].includes(compressionMethod)) {
+        throw new BadRequestException("Skill package entry compression method is not supported");
+      }
+      const name = this.normalizeZipPath(bytes.subarray(nameStart, nameStart + fileNameLength).toString("utf8"));
+      if (!name) {
+        throw new BadRequestException("Skill package entries must have safe relative paths");
+      }
+      totalUncompressedBytes += uncompressedSize;
+      if (totalUncompressedBytes > maxSkillPackageUncompressedBytes) {
+        throw new BadRequestException("Skill package uncompressed content exceeds the 2MB limit");
+      }
+      if (localHeaderOffset + 30 > bytes.length || localHeaderOffset + compressedSize > bytes.length) {
+        throw new BadRequestException("Skill package local file header is invalid");
+      }
+      entries.push({ name, compressionMethod, flags, compressedSize, uncompressedSize, localHeaderOffset });
+      offset = nextOffset;
+    }
+    return entries;
+  }
+
+  private findEndOfCentralDirectory(bytes: Buffer): number {
+    const minOffset = Math.max(0, bytes.length - 65_557);
+    for (let offset = bytes.length - 22; offset >= minOffset; offset -= 1) {
+      if (bytes.readUInt32LE(offset) === 0x06054b50) {
+        return offset;
+      }
+    }
+    throw new BadRequestException("Skill package must be a valid zip archive");
+  }
+
+  private readZipEntryBytes(bytes: Buffer, entry: ZipEntryMetadata): Buffer {
+    const offset = entry.localHeaderOffset;
+    if (bytes.readUInt32LE(offset) !== 0x04034b50) {
+      throw new BadRequestException("Skill package local file header is invalid");
+    }
+    const fileNameLength = bytes.readUInt16LE(offset + 26);
+    const extraLength = bytes.readUInt16LE(offset + 28);
+    const dataStart = offset + 30 + fileNameLength + extraLength;
+    const dataEnd = dataStart + entry.compressedSize;
+    if (dataEnd > bytes.length) {
+      throw new BadRequestException("Skill package local file data is invalid");
+    }
+    const compressedBytes = bytes.subarray(dataStart, dataEnd);
+    const output = entry.compressionMethod === 0 ? Buffer.from(compressedBytes) : inflateRawSync(compressedBytes);
+    if (output.length !== entry.uncompressedSize) {
+      throw new BadRequestException("Skill package entry size metadata does not match content");
+    }
+    return output;
   }
 
   private normalizeZipPath(name: string): string {
