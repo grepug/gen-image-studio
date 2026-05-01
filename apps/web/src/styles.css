@@ -132,6 +132,7 @@ button {
   padding: 10px 12px;
   color: #e7efea;
   background: transparent;
+  text-decoration: none;
 }
 
 .nav-item.active,
@@ -214,6 +215,10 @@ button {
   gap: 16px;
 }
 
+.route-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .panel {
   background: white;
   border: 1px solid #dfe6e1;
@@ -283,6 +288,7 @@ button {
 .skill-list,
 .member-list,
 .metric-list,
+.settings-list,
 .job-history,
 .job-result {
   display: grid;
@@ -326,6 +332,7 @@ button {
 .skill-item,
 .member-item,
 .metric-list > div,
+.settings-list > div,
 .job-result {
   border: 1px solid #e2e9e5;
   border-radius: 8px;
@@ -382,13 +389,24 @@ button {
 .skill-item span,
 .member-item strong,
 .member-item span,
+.settings-list strong,
+.settings-list span,
 .metric-list span,
 .metric-list strong {
   display: block;
 }
 
+.settings-list span {
+  color: #72807a;
+  font-size: 0.86rem;
+}
+
 .metric-list strong {
   margin-top: 4px;
+}
+
+.settings-actions {
+  margin-top: 16px;
 }
 
 @media (max-width: 900px) {

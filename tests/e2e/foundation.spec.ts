@@ -23,6 +23,7 @@ async function login(page: Page, account = accounts[0]) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.locator(".topbar .eyebrow")).toHaveText(account.displayName);
   await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
+  await expect(page).toHaveURL(/\/studio$/);
 }
 
 async function signOut(page: Page) {
@@ -50,6 +51,33 @@ async function addVirtualAuthenticator(page: Page) {
   });
 }
 
+async function openStudio(page: Page) {
+  await openWorkspaceRoute(page, "/studio", "Studio");
+}
+
+async function openSkills(page: Page) {
+  await openWorkspaceRoute(page, "/skills", "Skills");
+}
+
+async function openProviders(page: Page) {
+  await openWorkspaceRoute(page, "/providers", "Providers");
+}
+
+async function openMembers(page: Page) {
+  await openWorkspaceRoute(page, "/members", "Members");
+}
+
+async function openSettings(page: Page) {
+  await openWorkspaceRoute(page, "/settings", "Settings");
+}
+
+async function openWorkspaceRoute(page: Page, path: string, label: string) {
+  const link = page.getByRole("link", { name: label });
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(link).toHaveAttribute("aria-current", "page");
+}
+
 test.describe("foundation workspace flows", () => {
   test("allows all five configured test accounts to log in", async ({ page }) => {
     for (const account of accounts) {
@@ -71,33 +99,31 @@ test.describe("foundation workspace flows", () => {
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   });
 
-  test("navigates workspace panels from sidebar actions", async ({ page }) => {
+  test("routes workspace sections from sidebar actions", async ({ page }) => {
     await resetBrowserState(page);
     await login(page);
 
-    const providersNav = page.getByRole("button", { name: "Providers" });
-    await providersNav.click();
-    await expect(providersNav).toHaveAttribute("aria-current", "location");
-    await expect(page.locator("#providers-panel")).toBeFocused();
+    await openProviders(page);
+    await expect(page.getByRole("heading", { name: "Provider Profiles" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Skills" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Add Provider" }).click();
     await expect(page.getByLabel("Provider name")).toBeFocused();
     await expect(page.getByLabel("Provider name")).toHaveValue("Local OpenAI Compatible");
 
-    const skillsNav = page.getByRole("button", { name: "Skills" });
-    await skillsNav.click();
-    await expect(skillsNav).toHaveAttribute("aria-current", "location");
-    await expect(page.locator("#skills-panel")).toBeFocused();
+    await openSkills(page);
+    await expect(page.getByRole("heading", { name: "Agent Skills" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Provider Profiles" })).toHaveCount(0);
 
-    const membersNav = page.getByRole("button", { name: "Members" });
-    await membersNav.click();
-    await expect(membersNav).toHaveAttribute("aria-current", "location");
-    await expect(page.locator("#members-panel")).toBeFocused();
+    await openMembers(page);
+    await expect(page.getByRole("heading", { name: "Workspace Access" })).toBeVisible();
 
-    const settingsNav = page.getByRole("button", { name: "Settings" });
-    await settingsNav.click();
-    await expect(settingsNav).toHaveAttribute("aria-current", "location");
-    await expect(page.locator("#settings-panel")).toBeFocused();
+    await openSettings(page);
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+    await page.goto("/providers");
+    await expect(page.getByRole("heading", { name: "Provider Profiles" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Providers" })).toHaveAttribute("aria-current", "page");
   });
 
   test("does not leak cached workspace data when switching users", async ({ page }) => {
@@ -131,6 +157,7 @@ test.describe("foundation workspace flows", () => {
     await resetBrowserState(page);
     await login(page);
 
+    await openSettings(page);
     await page.getByRole("button", { name: "Register Passkey" }).click();
     await expect(page.getByText("Passkey registered")).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
@@ -146,6 +173,7 @@ test.describe("foundation workspace flows", () => {
     await signOut(page);
     await login(page, accounts[0]);
 
+    await openMembers(page);
     await page.getByLabel("Member email").fill(accounts[1].email);
     await page.getByLabel("New member role").selectOption("member");
     await page.getByRole("button", { name: "Add Member" }).click();
@@ -155,6 +183,7 @@ test.describe("foundation workspace flows", () => {
 
     await signOut(page);
     await login(page, accounts[1]);
+    await openMembers(page);
     await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
     await expect(page.getByRole("heading", { name: "Personal Workspace" })).toBeVisible();
     await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toBeVisible();
@@ -165,6 +194,7 @@ test.describe("foundation workspace flows", () => {
 
     await signOut(page);
     await login(page, accounts[0]);
+    await openMembers(page);
     await page.getByLabel(`Role for ${accounts[1].displayName}`).selectOption("viewer");
     await expect(page.getByLabel(`Role for ${accounts[1].displayName}`)).toHaveValue("viewer");
     await page.locator(".member-item").filter({ hasText: accounts[1].displayName }).getByRole("button", { name: "Remove" }).click();
@@ -172,6 +202,7 @@ test.describe("foundation workspace flows", () => {
 
     await signOut(page);
     await login(page, accounts[1]);
+    await openMembers(page);
     await expect(page.locator(".member-item").filter({ hasText: accounts[0].displayName })).toHaveCount(0);
   });
 
@@ -191,6 +222,7 @@ description: First workspace skill.
 
 # First Workspace Skill
 `);
+    await openStudio(page);
     await page.getByLabel("Generation provider").selectOption({ label: "First Workspace Provider" });
     await page.getByLabel("Generation skill").selectOption({ label: "first-workspace-skill" });
 
@@ -237,6 +269,7 @@ description: Scoped job skill.
 
 # Scoped Job Skill
 `);
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Scoped Job Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "scoped-job-skill" });
       await page.getByLabel("Image prompt").fill("Workspace A generated prompt.");
@@ -277,6 +310,7 @@ description: Scoped job skill.
   test("creates a workspace provider profile without rendering the API key", async ({ page }) => {
     await login(page);
 
+    await openProviders(page);
     await page.getByLabel("Provider name").fill("Workspace Image Provider");
     await page.getByLabel("Base URL").fill("https://models.example.test/v1");
     await page.getByLabel("Default model").fill("gpt-image-workspace");
@@ -312,6 +346,7 @@ description: Skill for updated provider profile.
 # Editable Provider Skill
 `);
 
+      await openProviders(page);
       const providerRow = page.locator(".table-row").filter({ hasText: "Editable Provider" });
       await providerRow.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("Provider name").fill("Updated Provider");
@@ -326,6 +361,7 @@ description: Skill for updated provider profile.
       await expect(page.getByText("updated-secret-key")).toHaveCount(0);
 
       const prompt = `Use the updated provider ${Date.now()}.`;
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
       await page.getByLabel("Image prompt").fill(prompt);
@@ -337,6 +373,7 @@ description: Skill for updated provider profile.
         { type: "image_generation", model: "updated-image-model", action: "generate" }
       ]);
 
+      await openProviders(page);
       await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("Provider name").fill("Updated Provider No Key Rotation");
       await page.getByLabel("Default model").fill("second-text-model");
@@ -346,6 +383,7 @@ description: Skill for updated provider profile.
       await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toBeVisible();
 
       const secondPrompt = `Keep the existing provider key ${Date.now()}.`;
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Updated Provider No Key Rotation" });
       await page.getByLabel("Generation skill").selectOption({ label: "editable-provider-skill" });
       await page.getByLabel("Image prompt").fill(secondPrompt);
@@ -357,9 +395,11 @@ description: Skill for updated provider profile.
         { type: "image_generation", model: "second-image-model", action: "generate" }
       ]);
 
+      await openProviders(page);
       await page.locator(".table-row").filter({ hasText: "Updated Provider" }).getByRole("button", { name: "Edit" }).click();
       await page.getByRole("button", { name: "Delete Provider" }).click();
       await expect(page.locator(".table-row").filter({ hasText: "Updated Provider No Key Rotation" })).toHaveCount(0);
+      await openStudio(page);
       await expect(page.getByLabel("Generation provider")).toHaveValue("");
     } finally {
       await mock.close();
@@ -377,6 +417,7 @@ description: Skill for updated provider profile.
       model: "viewer-protected-model",
       apiKey: "viewer-protected-key"
     });
+    await openMembers(page);
     await page.getByLabel("Member email").fill(accounts[1].email);
     await page.getByLabel("New member role").selectOption("viewer");
     await page.getByRole("button", { name: "Add Member" }).click();
@@ -384,6 +425,7 @@ description: Skill for updated provider profile.
 
     await signOut(page);
     await login(page, accounts[1]);
+    await openProviders(page);
     await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
     await expect(page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" })).toBeVisible();
     await page.locator(".table-row").filter({ hasText: "Viewer Protected Provider" }).getByRole("button", { name: "Edit" }).click();
@@ -397,6 +439,7 @@ description: Skill for updated provider profile.
 
   test("indexes a valid Agent Skill from an uploaded Skill file", async ({ page }) => {
     await login(page);
+    await openSkills(page);
     const filePath = await writeSkillFile("valid-skill.md", `---
 name: e2e-image-skill
 description: Generates images for the Playwright flow.
@@ -426,6 +469,7 @@ version: 1.0.0
 
 # Viewer Readable Skill
 `);
+    await openMembers(page);
     await page.getByLabel("Member email").fill(accounts[1].email);
     await page.getByLabel("New member role").selectOption("viewer");
     await page.getByRole("button", { name: "Add Member" }).click();
@@ -433,6 +477,7 @@ version: 1.0.0
 
     await signOut(page);
     await login(page, accounts[1]);
+    await openSkills(page);
     await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
     await expect(page.locator(".skill-item").filter({ hasText: "viewer-readable-skill" })).toBeVisible();
 
@@ -482,6 +527,7 @@ Always render a polished packaged skill image.
         "zipped-image-skill/references/Scripts/unsafe.md": "This nested script text must not enter the prompt."
       });
 
+      await openSkills(page);
       await page.getByLabel("Skill file").setInputFiles(zipPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed zipped-image-skill")).toBeVisible();
@@ -490,6 +536,7 @@ Always render a polished packaged skill image.
       await expectStoredSkillDirectory(zipPath, zippedSkillMd);
 
       const prompt = `Use the zipped package instructions ${Date.now()}.`;
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Zip Skill Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "zipped-image-skill" });
       await page.getByLabel("Image prompt").fill(prompt);
@@ -517,6 +564,7 @@ Always render a polished packaged skill image.
 
   test("shows validation errors for an invalid Agent Skill file", async ({ page }) => {
     await login(page);
+    await openSkills(page);
     const filePath = await writeSkillFile("invalid-skill.md", "# No frontmatter here");
 
     await page.getByLabel("Skill file").setInputFiles(filePath);
@@ -697,10 +745,12 @@ description: Drives the mock generation request.
 
 Always produce a sharp product image.
 `);
+      await openSkills(page);
       await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed mock-generation-skill")).toBeVisible();
 
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Generation Mock Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "mock-generation-skill" });
       const prompt = `Create a chrome object on a neutral background ${Date.now()}.`;
@@ -751,10 +801,12 @@ description: Drives the mock failed generation request.
 
 # Mock Failure Skill
 `);
+      await openSkills(page);
       await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed mock-failure-skill")).toBeVisible();
 
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Failing Mock Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "mock-failure-skill" });
       await page.getByLabel("Image prompt").fill("This request should fail.");
@@ -800,6 +852,7 @@ description: Valid skill without provider permissions.
       });
       expect(upload.data?.uploadSkill.skill.id).toBeTruthy();
       await page.reload();
+      await openStudio(page);
       await expect(page.getByLabel("Generation skill").locator("option", { hasText: "no-permissions-skill" })).toHaveCount(1);
 
       await page.getByLabel("Generation provider").selectOption({ label: "Permission Mock Provider" });
@@ -840,6 +893,7 @@ description: Viewer block skill.
 # Viewer Block Skill
 `);
       const historyPrompt = `Viewer readable history prompt ${Date.now()}.`;
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Viewer Block Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "viewer-block-skill" });
       await page.getByLabel("Image prompt").fill(historyPrompt);
@@ -849,6 +903,7 @@ description: Viewer block skill.
       const ownerImage = page.getByAltText("generated-image generated image").first();
       await expect(ownerImage).toBeVisible();
       const ownerAssetUrl = await elementImageSrc(ownerImage);
+      await openMembers(page);
       await page.getByLabel("Member email").fill(accounts[1].email);
       await page.getByLabel("New member role").selectOption("viewer");
       await page.getByRole("button", { name: "Add Member" }).click();
@@ -856,6 +911,7 @@ description: Viewer block skill.
 
       await signOut(page);
       await login(page, accounts[1]);
+      await openStudio(page);
       await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
       await expect(page.getByLabel("Generation history")).toContainText(historyPrompt);
       await expect(page.getByLabel("Generation history")).toContainText("generated-image - image/png");
@@ -905,12 +961,14 @@ description: Shared history skill.
 
 # Shared History Skill
 `);
+      await openMembers(page);
       await page.getByLabel("Member email").fill(accounts[2].email);
       await page.getByLabel("New member role").selectOption("member");
       await page.getByRole("button", { name: "Add Member" }).click();
       const ownerWorkspaceId = await currentWorkspaceId(page);
       const prompt = `Collaborative history prompt ${Date.now()}.`;
 
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Shared History Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "shared-history-skill" });
       await page.getByLabel("Image prompt").fill(prompt);
@@ -920,6 +978,7 @@ description: Shared history skill.
 
       await signOut(page);
       await login(page, accounts[2]);
+      await openStudio(page);
       await page.getByLabel("Active workspace").selectOption(ownerWorkspaceId);
 
       await expect(page.getByLabel("Generation history")).toContainText(prompt);
@@ -949,10 +1008,12 @@ description: Valid skill for capability rejection.
 
 # Capability Skill
 `);
+      await openSkills(page);
       await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed capability-skill")).toBeVisible();
 
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "No Capability Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "capability-skill" });
       await page.getByLabel("Image prompt").fill("This request should be blocked by provider capabilities.");
@@ -982,10 +1043,12 @@ description: Valid skill for non-image rejection.
 
 # Non Image Skill
 `);
+      await openSkills(page);
       await page.getByLabel("Skill file").setInputFiles(skillPath);
       await page.getByRole("button", { name: "Upload Skill" }).click();
       await expect(page.getByText("Indexed non-image-skill")).toBeVisible();
 
+      await openStudio(page);
       await page.getByLabel("Generation provider").selectOption({ label: "Non Image Mock Provider" });
       await page.getByLabel("Generation skill").selectOption({ label: "non-image-skill" });
       await page.getByLabel("Image prompt").fill("This request should fail after upstream.");
@@ -1121,10 +1184,16 @@ async function activeWorkspaceId(page: Page): Promise<string> {
 async function uploadSkillFromUi(page: Page, fileName: string, content: string): Promise<void> {
   const filePath = await writeSkillFile(fileName, content);
   const skillName = content.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const previousPath = new URL(page.url()).pathname;
+  await page.goto("/skills");
+  await expect(page.getByRole("heading", { name: "Agent Skills" })).toBeVisible();
   await page.getByLabel("Skill file").setInputFiles(filePath);
   await page.getByRole("button", { name: "Upload Skill" }).click();
   if (skillName) {
     await expect(page.getByText(`Indexed ${skillName}`)).toBeVisible();
+  }
+  if (previousPath !== "/skills") {
+    await page.goto(previousPath);
   }
 }
 
