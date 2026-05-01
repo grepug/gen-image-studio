@@ -3,6 +3,7 @@ import { Button } from "@base-ui/react/button";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Boxes, KeyRound, Settings, Upload, UsersRound } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
   ADD_WORKSPACE_MEMBER,
   CURRENT_USER_QUERY,
@@ -75,8 +76,6 @@ interface GenerationJob {
 }
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
-type WorkspacePanel = "studio" | "skills" | "providers" | "members" | "settings";
-
 interface DashboardData {
   currentUser: {
     id: string;
@@ -125,11 +124,7 @@ interface LoggedInUser {
 
 export function App() {
   const apollo = useApolloClient();
-  const topbarRef = useRef<HTMLElement | null>(null);
-  const providerPanelRef = useRef<HTMLElement | null>(null);
-  const skillPanelRef = useRef<HTMLElement | null>(null);
-  const generationPanelRef = useRef<HTMLElement | null>(null);
-  const memberPanelRef = useRef<HTMLElement | null>(null);
+  const location = useLocation();
   const providerNameInputRef = useRef<HTMLInputElement | null>(null);
   const [email, setEmail] = useState("tester1@example.test");
   const [password, setPassword] = useState("test-password-1");
@@ -146,7 +141,6 @@ export function App() {
   const [generationProviderId, setGenerationProviderId] = useState("");
   const [generationSkillId, setGenerationSkillId] = useState("");
   const [generationPrompt, setGenerationPrompt] = useState("Create a clean studio image using this skill.");
-  const [activePanel, setActivePanel] = useState<WorkspacePanel>("studio");
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
   const currentUserQuery = useQuery<DashboardData>(CURRENT_USER_QUERY, {
@@ -322,30 +316,9 @@ export function App() {
     setProviderApiKey("test-key");
     if (options.focusForm) {
       window.requestAnimationFrame(() => {
-        scrollToPanel("providers", { focusPanel: false });
         providerNameInputRef.current?.focus();
       });
     }
-  }
-
-  function scrollToPanel(panel: WorkspacePanel, options: { focusPanel?: boolean } = {}) {
-    const panelRefs: Record<WorkspacePanel, HTMLElement | null> = {
-      studio: generationPanelRef.current,
-      skills: skillPanelRef.current,
-      providers: providerPanelRef.current,
-      members: memberPanelRef.current,
-      settings: topbarRef.current
-    };
-    const target = panelRefs[panel];
-    setActivePanel(panel);
-    target?.scrollIntoView({ block: "start" });
-    if (options.focusPanel ?? true) {
-      target?.focus({ preventScroll: true });
-    }
-  }
-
-  function navItemClass(panel: WorkspacePanel) {
-    return activePanel === panel ? "nav-item active" : "nav-item";
   }
 
   async function handleDeleteProvider() {
@@ -472,6 +445,10 @@ export function App() {
     );
   }
 
+  if (location.pathname === "/") {
+    return <Navigate to="/studio" replace />;
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -484,31 +461,31 @@ export function App() {
         </div>
 
         <nav className="nav-list" aria-label="Primary">
-          <Button className={navItemClass("studio")} aria-current={activePanel === "studio" ? "location" : undefined} onClick={() => scrollToPanel("studio")}>
+          <NavLink className={navItemClass} to="/studio">
             <Boxes size={18} />
             Studio
-          </Button>
-          <Button className={navItemClass("skills")} aria-current={activePanel === "skills" ? "location" : undefined} onClick={() => scrollToPanel("skills")}>
+          </NavLink>
+          <NavLink className={navItemClass} to="/skills">
             <Upload size={18} />
             Skills
-          </Button>
-          <Button className={navItemClass("providers")} aria-current={activePanel === "providers" ? "location" : undefined} onClick={() => scrollToPanel("providers")}>
+          </NavLink>
+          <NavLink className={navItemClass} to="/providers">
             <KeyRound size={18} />
             Providers
-          </Button>
-          <Button className={navItemClass("members")} aria-current={activePanel === "members" ? "location" : undefined} onClick={() => scrollToPanel("members")}>
+          </NavLink>
+          <NavLink className={navItemClass} to="/members">
             <UsersRound size={18} />
             Members
-          </Button>
-          <Button className={navItemClass("settings")} aria-current={activePanel === "settings" ? "location" : undefined} onClick={() => scrollToPanel("settings")}>
+          </NavLink>
+          <NavLink className={navItemClass} to="/settings">
             <Settings size={18} />
             Settings
-          </Button>
+          </NavLink>
         </nav>
       </aside>
 
       <section className="workspace">
-        <header className="topbar" id="settings-panel" ref={topbarRef} tabIndex={-1} aria-labelledby="workspace-title">
+        <header className="topbar" aria-labelledby="workspace-title">
           <div>
             <p className="eyebrow">{currentUserName}</p>
             <h1 id="workspace-title">{activeWorkspace?.name ?? "Workspace setup"}</h1>
@@ -528,19 +505,101 @@ export function App() {
             ) : null}
           </div>
           <div className="topbar-actions">
-            <Button className="secondary-button" onClick={handleRegisterPasskey}>
-              <KeyRound size={18} />
-              Register Passkey
-            </Button>
             <Button className="secondary-button" onClick={handleLogout}>
               Sign out
             </Button>
           </div>
-          {passkeyMessage ? <p className="success-text topbar-message">{passkeyMessage}</p> : null}
         </header>
 
-        <div className="content-grid">
-          <section className="panel wide" id="providers-panel" ref={providerPanelRef} tabIndex={-1} aria-labelledby="providers-title">
+        <div className="content-grid route-content">
+          <Routes>
+            <Route
+              path="/studio"
+              element={
+                <section className="panel" aria-labelledby="studio-title">
+                  <div className="panel-header compact">
+                    <div>
+                      <h2 id="studio-title">Generate Image</h2>
+                      <p>Run the selected Agent Skill against a workspace provider.</p>
+                    </div>
+                  </div>
+                  <form className="stacked-form" onSubmit={handleGenerationSubmit}>
+                    <label>
+                      Generation provider
+                      <select
+                        value={selectedProviderId}
+                        onChange={(event) => setGenerationProviderId(event.target.value)}
+                      >
+                        <option value="">Select provider</option>
+                        {providerRows.map((profile) => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Generation skill
+                      <select value={selectedSkillId} onChange={(event) => setGenerationSkillId(event.target.value)}>
+                        <option value="">Select skill</option>
+                        {skillRows.map((skill) => (
+                          <option key={skill.id} value={skill.id}>
+                            {skill.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Image prompt
+                      <textarea value={generationPrompt} onChange={(event) => setGenerationPrompt(event.target.value)} rows={4} />
+                    </label>
+                    {generationError ? <p className="error-text">{generationError}</p> : null}
+                    <Button className="primary-button" type="submit" disabled={!selectedProviderId || !selectedSkillId || generationMutation.loading}>
+                      {generationMutation.loading ? "Running" : "Run Generation"}
+                    </Button>
+                  </form>
+                  <div className="job-history" aria-label="Generation history">
+                    {jobRows.length === 0 ? (
+                      <div className="empty-block">No generation jobs in this workspace.</div>
+                    ) : (
+                      jobRows.map((job) => {
+                        const latestEvent = job.events.at(-1);
+                        return (
+                          <article className="job-result" key={job.id}>
+                            <strong>Job {job.status}</strong>
+                            <span>{job.prompt}</span>
+                            {latestEvent?.message ? <span>{latestEvent.message}</span> : null}
+                            {job.outputs.map((output) => (
+                              <div className="job-output" key={output.id}>
+                                {output.mimeType.startsWith("image/") ? (
+                                  <img
+                                    alt={`${output.label} generated image`}
+                                    className="job-output-image"
+                                    src={resolveApiUrl(output.assetUrl)}
+                                  />
+                                ) : null}
+                                <div className="job-output-meta">
+                                  <span>
+                                    {output.label} - {output.mimeType} - {output.byteSize} bytes
+                                  </span>
+                                  <a href={resolveApiUrl(output.assetUrl)} target="_blank" rel="noreferrer">
+                                    Open image
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </article>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
+              }
+            />
+            <Route
+              path="/providers"
+              element={
+                <section className="panel" aria-labelledby="providers-title">
             <div className="panel-header">
               <div>
                 <h2 id="providers-title">Provider Profiles</h2>
@@ -616,8 +675,12 @@ export function App() {
               </div>
             </form>
           </section>
-
-          <section className="panel" id="skills-panel" ref={skillPanelRef} tabIndex={-1} aria-labelledby="skills-title">
+              }
+            />
+            <Route
+              path="/skills"
+              element={
+                <section className="panel" aria-labelledby="skills-title">
             <div className="panel-header compact">
               <div>
                 <h2 id="skills-title">Agent Skills</h2>
@@ -656,87 +719,12 @@ export function App() {
               </Button>
             </form>
           </section>
-
-          <section className="panel" id="studio-panel" ref={generationPanelRef} tabIndex={-1} aria-labelledby="studio-title">
-            <div className="panel-header compact">
-              <div>
-                <h2 id="studio-title">Generate Image</h2>
-                <p>Run the selected Agent Skill against a workspace provider.</p>
-              </div>
-            </div>
-            <form className="stacked-form" onSubmit={handleGenerationSubmit}>
-              <label>
-                Generation provider
-                <select
-                  value={selectedProviderId}
-                  onChange={(event) => setGenerationProviderId(event.target.value)}
-                >
-                  <option value="">Select provider</option>
-                  {providerRows.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Generation skill
-                <select value={selectedSkillId} onChange={(event) => setGenerationSkillId(event.target.value)}>
-                  <option value="">Select skill</option>
-                  {skillRows.map((skill) => (
-                    <option key={skill.id} value={skill.id}>
-                      {skill.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Image prompt
-                <textarea value={generationPrompt} onChange={(event) => setGenerationPrompt(event.target.value)} rows={4} />
-              </label>
-              {generationError ? <p className="error-text">{generationError}</p> : null}
-              <Button className="primary-button" type="submit" disabled={!selectedProviderId || !selectedSkillId || generationMutation.loading}>
-                {generationMutation.loading ? "Running" : "Run Generation"}
-              </Button>
-            </form>
-            <div className="job-history" aria-label="Generation history">
-              {jobRows.length === 0 ? (
-                <div className="empty-block">No generation jobs in this workspace.</div>
-              ) : (
-                jobRows.map((job) => {
-                  const latestEvent = job.events.at(-1);
-                  return (
-                    <article className="job-result" key={job.id}>
-                      <strong>Job {job.status}</strong>
-                      <span>{job.prompt}</span>
-                      {latestEvent?.message ? <span>{latestEvent.message}</span> : null}
-                      {job.outputs.map((output) => (
-                        <div className="job-output" key={output.id}>
-                          {output.mimeType.startsWith("image/") ? (
-                            <img
-                              alt={`${output.label} generated image`}
-                              className="job-output-image"
-                              src={resolveApiUrl(output.assetUrl)}
-                            />
-                          ) : null}
-                          <div className="job-output-meta">
-                            <span>
-                              {output.label} - {output.mimeType} - {output.byteSize} bytes
-                            </span>
-                            <a href={resolveApiUrl(output.assetUrl)} target="_blank" rel="noreferrer">
-                              Open image
-                            </a>
-                          </div>
-                        </div>
-                      ))}
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </section>
-
-          <section className="panel" id="members-panel" ref={memberPanelRef} tabIndex={-1} aria-labelledby="members-title">
+              }
+            />
+            <Route
+              path="/members"
+              element={
+                <section className="panel" aria-labelledby="members-title">
             <div className="panel-header compact">
               <div>
                 <h2 id="members-title">Workspace Access</h2>
@@ -789,6 +777,40 @@ export function App() {
               </Button>
             </form>
           </section>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <section className="panel" aria-labelledby="settings-title">
+                  <div className="panel-header compact">
+                    <div>
+                      <h2 id="settings-title">Settings</h2>
+                      <p>Account security and workspace context for this browser session.</p>
+                    </div>
+                  </div>
+                  <div className="settings-list">
+                    <div>
+                      <span>Signed in as</span>
+                      <strong>{currentUserName}</strong>
+                    </div>
+                    <div>
+                      <span>Active workspace</span>
+                      <strong>{activeWorkspace?.name ?? "Workspace setup"}</strong>
+                    </div>
+                  </div>
+                  <div className="form-actions settings-actions">
+                    <Button className="secondary-button" onClick={handleRegisterPasskey}>
+                      <KeyRound size={18} />
+                      Register Passkey
+                    </Button>
+                  </div>
+                  {passkeyMessage ? <p className="success-text">{passkeyMessage}</p> : null}
+                </section>
+              }
+            />
+            <Route path="*" element={<Navigate to="/studio" replace />} />
+          </Routes>
         </div>
       </section>
     </main>
@@ -815,4 +837,8 @@ function resolveApiUrl(path: string): string {
 
 function fallbackSkillMimeType(fileName: string): string {
   return fileName.toLowerCase().endsWith(".zip") ? "application/octet-stream" : "text/markdown";
+}
+
+function navItemClass({ isActive }: { isActive: boolean }) {
+  return isActive ? "nav-item active" : "nav-item";
 }
